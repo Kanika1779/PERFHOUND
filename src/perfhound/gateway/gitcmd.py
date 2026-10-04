@@ -39,22 +39,27 @@ def run_git(
     """Run `git <args>` inside `repo` and return the completed process.
 
     Arguments are passed as a list (no shell), so refs with spaces or
-    special characters cannot inject commands. Output is decoded as UTF-8
-    with replacement, so a commit with broken encoding cannot crash us.
+    special characters cannot inject commands.
+
+    I/O is done in BYTES and decoded here (UTF-8, invalid bytes replaced).
+    Python's text mode would translate newlines on Windows: "\n" written to
+    stdin becomes "\r\n" (git fetch --stdin then rejects every SHA), and
+    "\r\n" / "\r" in git's output become "\n" (diffs of CRLF files change).
     """
     cmd = [git_executable(), *args]
     full_env = dict(os.environ)
     full_env.update(_GIT_ENV_OVERRIDES)
     full_env.update(env or {})
-    proc = subprocess.run(
+    raw = subprocess.run(
         cmd,
         cwd=str(repo),
-        input=input,
+        input=None if input is None else input.encode("utf-8"),
         env=full_env,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+    )
+    proc = subprocess.CompletedProcess(
+        raw.args, raw.returncode,
+        raw.stdout.decode("utf-8", "replace"), raw.stderr.decode("utf-8", "replace"),
     )
     if check and proc.returncode not in ok_codes:
         raise GitCommandError(list(args), proc.returncode, proc.stderr)

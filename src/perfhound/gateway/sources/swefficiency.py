@@ -37,7 +37,7 @@ from typing import Callable, Iterator
 from ..cases import BenchmarkSpec, RegressionCase
 from ..errors import GatewayError
 from ..fetcher import RepoFetcher, is_remote
-from ..gitcmd import ensure_objects, run_git
+from ..gitcmd import ensure_objects, run_git, run_git_bytes
 from ..local_git import prefetch_blobs
 from ..worktree import WorktreeManager
 from . import register_source
@@ -137,22 +137,23 @@ def first_parent_after(repo: Path, commit: str, n: int, ref: str) -> list[str]:
     return _git(repo, "rev-list", "--first-parent", "--reverse", f"{commit}..{ref}").split()[:n]
 
 
-def source_only_diff(repo: Path, base: str, head: str) -> str:
+def source_only_diff(repo: Path, base: str, head: str) -> bytes:
+    """Expert patch as BYTES, so files in any encoding / with CRLF round-trip exactly."""
     files = [f for f in _git(repo, "diff", "--name-only", base, head).splitlines()
              if f.endswith(".py") and not TEST_PATH.search(f) and not f.startswith("doc")]
     if not files:
-        return ""
-    return run_git(repo, "diff", "--binary", base, head, "--", *files).stdout
+        return b""
+    return run_git_bytes(repo, "diff", "--binary", base, head, "--", *files)
 
 
-def _injected_message(strategy: str, repo: Path, opt: str, patch: str) -> str:
+def _injected_message(strategy: str, repo: Path, opt: str, patch: bytes) -> str:
     if strategy == "revert":   # deliberately easy variant (an ablation): the message gives it away
         subject = _git(repo, "show", "-s", "--format=%s", opt)
         return f'Revert "{subject}"\n\nThis reverts commit {opt}.'
     if strategy == "neutral":
         changed: dict[str, int] = {}
         current = None
-        for ln in patch.splitlines():
+        for ln in patch.decode("utf-8", "replace").split("\n"):
             if ln.startswith("+++ b/"):
                 current = ln[6:]
                 changed[current] = 0
@@ -208,11 +209,12 @@ def build_injected_case(
     ensure_objects(repo, tree_blobs)
     prefetch_blobs(repo, [opt, *mainline])
 
-    patch = task.patch if task.patch else source_only_diff(repo, _git(repo, "rev-parse", f"{opt}^1"), opt)
+    patch: bytes = (task.patch.encode("utf-8") if task.patch
+                    else source_only_diff(repo, _git(repo, "rev-parse", f"{opt}^1"), opt))
     if not patch.strip():
         return InjectionFailure(instance_id, "empty_patch", "optimization touches no non-test .py files")
-    if not patch.endswith("\n"):
-        patch += "\n"
+    if not patch.endswith(b"\n"):
+        patch += b"\n"
 
     upstream_of: dict[str, str] = {}
     culprit = ""
@@ -221,7 +223,7 @@ def build_injected_case(
         def revert_optimization() -> str | None:
             """Reverse-apply the expert patch to the index; returns an error text on conflict."""
             patch_file = wt / ".perfhound_opt.patch"
-            patch_file.write_text(patch, encoding="utf-8", errors="surrogateescape", newline="\n")
+            patch_file.write_bytes(patch)
             try:
                 applied = run_git(wt, "apply", "-R", "--index", str(patch_file), check=False)
                 if applied.returncode != 0:

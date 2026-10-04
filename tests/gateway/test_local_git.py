@@ -150,3 +150,17 @@ def test_does_not_modify_repo(fixture_repo):
     before = (fixture_repo.git("status", "--porcelain"), fixture_repo.git("rev-parse", "HEAD"))
     Gateway(fixture_repo.path).get_candidates(GOOD_TAG, BAD_TAG)
     assert (fixture_repo.git("status", "--porcelain"), fixture_repo.git("rev-parse", "HEAD")) == before
+
+
+def test_crlf_and_lone_cr_survive_exactly(fresh_fixture_repo):
+    """Windows regression: text-mode pipes turned \r\n into \n (and \n into \r\n on stdin)."""
+    repo = fresh_fixture_repo
+    (repo.path / "win.py").write_bytes(b"def f():\r\n    return 1\r\n")
+    repo.git("add", "win.py")
+    repo.git("commit", "-q", "-m", "crlf file")
+    (repo.path / "win.py").write_bytes(b"def f():\r\n    return 2\r\n")
+    repo.git("commit", "-qam", "Message with a lone\rcarriage return")
+    first, second = Gateway(repo.path, cache=False).get_candidates(BAD_TAG, "HEAD")
+    assert "+    return 2\r\n" in second.diff
+    assert "\r" in second.message
+    assert second.changed_functions == ("win.f",)
