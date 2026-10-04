@@ -50,5 +50,5 @@ pytest
 |---|---|---|
 | A | Analyzer plug-ins + Java (tree-sitter) | done |
 | B | RegressionCase + Source Adapters + Repo Fetcher | done |
-| C | Adapters: SWE-fficiency, pandas asv-runner, ICPE JMH, Zenodo, generic | - |
+| C | Adapters: SWE-fficiency (done), pandas asv-runner, ICPE JMH, Zenodo | in progress |
 | D | Document builder for RAG | - |

@@ -137,6 +137,12 @@ class Compose:
 DEFAULT_TELL_WORDS = ("inject", "injected", "regression", "synthetic", "perfhound", "artificial", "slowdown")
 
 
+_SUBJECT_SHAPES = (
+    ("merge-commit style", lambda s: s.startswith(("Merge pull request #", "Merge branch ", "Merge remote-tracking"))),
+    ("squash-merge style '(#n)'", lambda s: bool(re.search(r"\(#\d+\)\s*$", s))),
+)
+
+
 @dataclass(frozen=True)
 class Tell:
     sha: str
@@ -179,6 +185,16 @@ def find_tells(
             for w in words:
                 if has(w, c, where) and not any(has(w, o, where) for o in others):
                     tells.append(Tell(c.sha, where, f"word {w!r} appears only in suspect commits"))
+        # message SHAPE: e.g. every main-line commit is "Merge pull request #..." or ends in "(#123)"
+        if len(others) >= 3:
+            for label, shape in _SUBJECT_SHAPES:
+                share = sum(1 for o in others if shape(o.subject)) / len(others)
+                if share >= 0.8 and not shape(c.subject):
+                    tells.append(Tell(c.sha, "message", f"subject does not look like the others ({label}: "
+                                                        f"{share:.0%} of other commits)"))
+            # timezone offset nobody else uses
+            if c.timestamp.utcoffset() not in {o.timestamp.utcoffset() for o in others}:
+                tells.append(Tell(c.sha, "timestamp", f"timezone {c.timestamp.strftime('%z')} used by no other commit"))
         # date out of order relative to its neighbours on the main line
         idx = candidates.index(c)
         prev_t = candidates[idx - 1].timestamp if idx > 0 else None

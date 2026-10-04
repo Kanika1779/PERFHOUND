@@ -23,6 +23,7 @@ import hashlib
 import os
 import re
 import shutil
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -88,6 +89,7 @@ class RepoFetcher:
         if (dest / ".git").exists():
             return dest
         dest.parent.mkdir(parents=True, exist_ok=True)
+        self._remove_stale_tmp(dest)
         tmp = dest.parent / f".{dest.name}.tmp-{uuid.uuid4().hex[:8]}"
         args = ["clone", "--quiet", "--no-checkout"]
         if self.filter_blobs:
@@ -106,6 +108,17 @@ class RepoFetcher:
             if tmp.exists():
                 _rmtree(tmp)
         return dest
+
+    STALE_TMP_SECONDS = 6 * 3600
+
+    def _remove_stale_tmp(self, dest: Path) -> None:
+        """Half-finished clones of killed processes (older than 6 h; a younger one may still be running)."""
+        for p in dest.parent.glob(f".{dest.name}.tmp-*"):
+            try:
+                if time.time() - p.stat().st_mtime > self.STALE_TMP_SECONDS:
+                    _rmtree(p)
+            except OSError:
+                pass
 
     def ensure_commits(self, path: str | Path, refs: list[str]) -> list[str]:
         """Make sure `refs` exist locally, fetching from origin if needed.

@@ -105,3 +105,17 @@ def test_for_case_reports_missing_commits(remote, tmp_path):
                           good=GOOD_TAG, bad="f" * 40)
     with pytest.raises(GatewayError, match="not found"):
         Gateway.for_case(case, fetcher=RepoFetcher(tmp_path / "repos"), cache=False)
+
+
+def test_stale_half_clones_are_removed(remote, tmp_path):
+    import os, time
+    f = RepoFetcher(tmp_path / "repos")
+    dest = local_dir_for(remote.url, tmp_path / "repos")
+    dest.parent.mkdir(parents=True)
+    old = dest.parent / f".{dest.name}.tmp-dead0001"
+    young = dest.parent / f".{dest.name}.tmp-busy0002"
+    for p in (old, young):
+        (p / "objects").mkdir(parents=True)
+    os.utime(old, (time.time() - 7 * 3600,) * 2)
+    f.fetch(remote.url)
+    assert not old.exists() and young.exists()

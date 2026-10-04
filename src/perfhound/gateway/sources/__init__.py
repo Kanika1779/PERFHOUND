@@ -94,3 +94,11 @@ class GitRangeAdapter:
 
 register_source("json", JsonCasesAdapter)
 register_source("git", GitRangeAdapter)
+
+
+def _load_builtin_adapters() -> None:
+    """Dataset adapters register themselves on import."""
+    from . import swefficiency  # noqa: F401
+
+
+_load_builtin_adapters()

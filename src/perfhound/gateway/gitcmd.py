@@ -34,6 +34,7 @@ def run_git(
     check: bool = True,
     ok_codes: tuple[int, ...] = (0,),
     input: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run `git <args>` inside `repo` and return the completed process.
 
@@ -42,13 +43,14 @@ def run_git(
     with replacement, so a commit with broken encoding cannot crash us.
     """
     cmd = [git_executable(), *args]
-    env = dict(os.environ)
-    env.update(_GIT_ENV_OVERRIDES)
+    full_env = dict(os.environ)
+    full_env.update(_GIT_ENV_OVERRIDES)
+    full_env.update(env or {})
     proc = subprocess.run(
         cmd,
         cwd=str(repo),
         input=input,
-        env=env,
+        env=full_env,
         capture_output=True,
         text=True,
         encoding="utf-8",
