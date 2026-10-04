@@ -40,6 +40,6 @@ pytest
 | 5 | Code Analyzer | done |
 | 6 | Worktree Manager | done |
 | 7 | Cache (SQLite) | done |
-| 8 | Snapshot Store | - |
+| 8 | Snapshot Store | done |
 | 9 | GitHub Provider | - |
 | 10 | Validation on a real repo | - |

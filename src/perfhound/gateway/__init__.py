@@ -8,5 +8,6 @@ from .api import Gateway
 from .errors import GatewayError
 from .models import CandidateCommit, FileChange, PRInfo
 from .range import CommitRange
+from .snapshot import Snapshot, SnapshotError
 
-__all__ = ["Gateway", "GatewayError", "CandidateCommit", "FileChange", "PRInfo", "CommitRange"]
+__all__ = ["Gateway", "GatewayError", "CandidateCommit", "FileChange", "PRInfo", "CommitRange", "Snapshot", "SnapshotError"]

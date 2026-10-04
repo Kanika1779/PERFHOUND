@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .gitcmd import run_git
 from .local_git import DEFAULT_MAX_DIFF_CHARS, DEFAULT_MAX_DIFF_LINES, LocalGitProvider
 from .models import SCHEMA_VERSION, CandidateCommit
 from .range import CommitRange, find_repo_root, resolve_range
+from .snapshot import Snapshot, build_snapshot
 from .worktree import WorktreeManager
 
 
@@ -99,6 +101,25 @@ class Gateway:
             commits, function_hits = self._add_functions(commits)
         self.last_stats = RequestStats(len(commits), commit_hits, function_hits, time.perf_counter() - start)
         return commits
+
+    def snapshot(self, path: str | Path, good: str, bad: str, *, sanitizer=None, **range_options) -> Snapshot:
+        """Freeze good..bad into a verified JSON file for reproducible experiments."""
+        from perfhound import __version__
+
+        commit_range = self.resolve(good, bad, **range_options)
+        candidates = self.get_candidates(commit_range.good, commit_range.bad, **range_options)
+        meta = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "perfhound_version": __version__,
+            "repo_id": self.repo_id,
+            "good_ref": good, "bad_ref": bad,
+            "good": commit_range.good, "bad": commit_range.bad,
+            "settings": {"max_diff_lines": self.max_diff_lines, "max_diff_chars": self.max_diff_chars,
+                         "analyzer_version": ANALYZER_VERSION},
+        }
+        snap = build_snapshot(candidates, meta, sanitizer)
+        snap.save(path)
+        return snap
 
     def worktree(self, **options) -> WorktreeManager:
         """A private checkout area for benchmarking; never touches the user's folder."""
