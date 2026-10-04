@@ -245,8 +245,9 @@ def build_injected_case(
                     return InjectionFailure(instance_id, "revert_conflict", error)
                 # borrow identity from the previous real commit, and a date BETWEEN the previous
                 # and next real commits (a fixed "+60 s" can land after the next commit: a tell)
-                name, email, ts = _git(repo, "show", "-s", "--format=%an%x1f%ae%x1f%at", prev).split("\x1f")
-                date = f"@{_between(repo, int(ts), next_real)} +0000"
+                name, email, ts, iso = _git(repo, "show", "-s", "--format=%an%x1f%ae%x1f%at%x1f%ai", prev).split("\x1f")
+                offset = iso.split()[-1]   # e.g. "-0500": keep the neighbour's timezone too ("+0000" was a tell)
+                date = f"@{_between(repo, int(ts), next_real)} {offset}"
                 env = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date,
                        "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email, "GIT_COMMITTER_DATE": date}
                 run_git(wt, "commit", "-q", "--no-verify", "-m",

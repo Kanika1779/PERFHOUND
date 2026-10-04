@@ -216,3 +216,17 @@ def test_aprcl_instances_adapter(tmp_path):
     assert case.expected_magnitude == pytest.approx(0.84)
     assert case.benchmark.workload == "print('wl')\n"
     assert "c" * 40 not in case.for_localizer().to_json()
+
+
+def test_injected_commit_keeps_the_neighbours_timezone(tmp_path, monkeypatch):
+    """Found on Windows (IST laptop): the injected commit was always +0000 while all real ones were +0530."""
+    monkeypatch.setenv("TZ", "IST-5:30")          # POSIX TZ string: commits below get +0530
+    upstream = build_upstream(tmp_path / "up")
+    tf = tmp_path / "tasks.json"
+    save_task_file([TASK], tf)
+    fetcher = RepoFetcher(tmp_path / "repos")
+    (case,) = list(adapter(upstream, tf, fetcher, n_after=4, positions=[2], message_strategy="neutral").cases())
+    cands = Gateway.for_case(case, fetcher=fetcher, cache=False).candidates_for(case)
+    offsets = {c.timestamp.utcoffset() for c in cands}
+    assert len(offsets) == 1 and next(iter(offsets)).total_seconds() == 5.5 * 3600
+    assert find_tells(cands, [case.culprit]) == []
