@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from .fixture_repo import FixtureRepo, build_fixture_repo
@@ -17,3 +19,15 @@ def fixture_repo(tmp_path_factory) -> FixtureRepo:
 def fresh_fixture_repo(tmp_path) -> FixtureRepo:
     """A private copy of the fixture repo for tests that mutate it."""
     return build_fixture_repo(tmp_path / "repo")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_cache_dir(tmp_path_factory):
+    """Never let tests write to the real ~/.perfhound/cache.db."""
+    old = os.environ.get("PERFHOUND_CACHE_DIR")
+    os.environ["PERFHOUND_CACHE_DIR"] = str(tmp_path_factory.mktemp("perfhound_cache"))
+    yield
+    if old is None:
+        os.environ.pop("PERFHOUND_CACHE_DIR", None)
+    else:
+        os.environ["PERFHOUND_CACHE_DIR"] = old

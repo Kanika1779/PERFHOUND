@@ -39,7 +39,7 @@ pytest
 | 4 | Local Git Provider | done |
 | 5 | Code Analyzer | done |
 | 6 | Worktree Manager | done |
-| 7 | Cache (SQLite) | - |
+| 7 | Cache (SQLite) | done |
 | 8 | Snapshot Store | - |
 | 9 | GitHub Provider | - |
 | 10 | Validation on a real repo | - |

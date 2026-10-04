@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import ast
 import copy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -37,6 +37,7 @@ from .gitcmd import read_blobs
 from .models import CandidateCommit
 
 DEFAULT_MAX_FILE_BYTES = 2_000_000
+ANALYZER_VERSION = 1   # bump when analysis output changes -> old cache entries are ignored
 _FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -68,44 +69,73 @@ def path_to_module(path: str) -> str:
     return ".".join(parts)
 
 
-class _StripDocstrings(ast.NodeTransformer):
-    def _strip(self, node):
-        self.generic_visit(node)
-        body = node.body
-        if (
-            body
-            and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)
-        ):
-            node.body = body[1:] or [ast.Pass()]
-        return node
-
-    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = visit_Module = _strip
+_BODY_OWNERS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)
 
 
-def _fingerprint(node: ast.AST) -> str:
-    """Structure of the code, ignoring comments, formatting, docstrings, positions."""
-    return ast.dump(node, annotate_fields=False, include_attributes=False)
+def _without_docstring(body: list[ast.stmt]) -> list:
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        return body[1:] or [ast.Pass()]
+    return body
+
+
+def _fingerprint(node) -> str:
+    """Structure of the code, ignoring comments, formatting, docstrings and positions.
+
+    Like ast.dump(include_attributes=False) but skips docstrings while
+    serializing, so the tree never has to be copied or rewritten.
+    """
+    if isinstance(node, ast.AST):
+        parts = [type(node).__name__]
+        for name, value in ast.iter_fields(node):
+            if name == "body" and isinstance(node, _BODY_OWNERS):
+                value = _without_docstring(value)
+            elif name == "type_comment":
+                continue
+            parts.append(_fingerprint(value))
+        return "(" + " ".join(parts) + ")"
+    if isinstance(node, list):
+        return "[" + " ".join(_fingerprint(x) for x in node) + "]"
+    return repr(node)
 
 
 @dataclass(frozen=True)
-class Definitions:
-    """Fingerprints of everything defined in one file.
+class _Entry:
+    raw: str            # exact source text (fast path: equal text => equal code)
+    node: ast.AST       # fingerprinted lazily, only when the raw text differs
 
-    fingerprints keys: 'func', 'Class.method', 'outer.<locals>.inner',
+
+@dataclass
+class Definitions:
+    """Everything defined in one file.
+
+    entries keys: 'func', 'Class.method', 'outer.<locals>.inner',
     'Class' (class-level code only) and '<module>' (module-level code only).
     """
 
-    fingerprints: dict[str, str]
+    entries: dict[str, _Entry]
     classes: frozenset[str]
+    _fps: dict[str, str] = field(default_factory=dict)
+
+    def fingerprint(self, key: str) -> str:
+        if key not in self._fps:
+            self._fps[key] = _fingerprint(self.entries[key].node)
+        return self._fps[key]
+
+    @property
+    def fingerprints(self) -> dict[str, str]:   # convenience for tests / debugging
+        return {k: self.fingerprint(k) for k in self.entries}
 
 
 def _child_statements(node: ast.stmt) -> list[ast.stmt]:
     """Statements nested in if / for / while / with / try / match blocks."""
     out: list[ast.stmt] = []
-    for field in ("body", "orelse", "finalbody"):
-        out.extend(s for s in getattr(node, field, None) or [] if isinstance(s, ast.stmt))
+    for name in ("body", "orelse", "finalbody"):
+        out.extend(s for s in getattr(node, name, None) or [] if isinstance(s, ast.stmt))
     for handler in getattr(node, "handlers", None) or []:
         out.extend(handler.body)
     for case in getattr(node, "cases", None) or []:   # match statement
@@ -118,53 +148,56 @@ def _residual(stmts: list[ast.stmt]) -> list[ast.stmt]:
 
 
 def extract_definitions(source: bytes) -> Definitions:
-    """Parse a file and fingerprint every function / class body / module body.
+    """Parse a file and index every function / class body / module body.
 
     Raises SyntaxError / ValueError when the source cannot be parsed.
     """
-    tree = _StripDocstrings().visit(ast.parse(source))
-    fps: dict[str, str] = {}
+    tree = ast.parse(source)
+    lines = source.decode("utf-8", "replace").split("\n")
+    entries: dict[str, _Entry] = {}
     classes: set[str] = set()
+
+    def text(node: ast.AST) -> str:
+        first = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
+        return "\n".join(lines[first - 1:node.end_lineno])
 
     def walk(stmts: list[ast.stmt], prefix: str) -> None:
         for node in stmts:
             if isinstance(node, _FUNC_TYPES):
                 name = prefix + node.name
-                fps[name] = _fingerprint(node)
+                entries[name] = _Entry(text(node), node)
                 walk(node.body, name + ".<locals>.")
             elif isinstance(node, ast.ClassDef):
                 name = prefix + node.name
                 classes.add(name)
                 shell = copy.copy(node)
                 shell.body = _residual(node.body)
-                fps[name] = _fingerprint(shell)
+                entries[name] = _Entry(text(node), shell)
                 walk(node.body, name + ".")
             else:
                 walk(_child_statements(node), prefix)
 
     walk(tree.body, "")
-    fps["<module>"] = _fingerprint(ast.Module(body=_residual(tree.body), type_ignores=[]))
-    return Definitions(fps, frozenset(classes))
+    residual = _residual(tree.body)
+    entries["<module>"] = _Entry("\x00".join(text(s) for s in residual),
+                                 ast.Module(body=residual, type_ignores=[]))
+    return Definitions(entries, frozenset(classes))
 
 
-def diff_definitions(old_source: bytes | None, new_source: bytes | None, module: str) -> FunctionChanges:
-    """Compare one file before/after. None = file did not exist on that side.
+_EMPTY = Definitions({}, frozenset())
 
-    Raises SyntaxError / ValueError if either side cannot be parsed.
-    """
-    empty = Definitions({}, frozenset())
-    old = extract_definitions(old_source) if old_source is not None else empty
-    new = extract_definitions(new_source) if new_source is not None else empty
+
+def diff_parsed(old: Definitions, new: Definitions, module: str) -> FunctionChanges:
     classes = old.classes | new.classes
 
     def q(key: str) -> str:
         return f"{module}.{key}" if module else key
 
     changed, added, deleted = [], [], []
-    for key in sorted(set(old.fingerprints) | set(new.fingerprints)):
-        in_old, in_new = key in old.fingerprints, key in new.fingerprints
+    for key in sorted(set(old.entries) | set(new.entries)):
+        in_old, in_new = key in old.entries, key in new.entries
         if in_old and in_new:
-            if old.fingerprints[key] != new.fingerprints[key]:
+            if old.entries[key].raw != new.entries[key].raw and old.fingerprint(key) != new.fingerprint(key):
                 changed.append(q(key))
         elif key in classes or key == "<module>":
             continue  # a new / removed class or file shows up through its functions
@@ -173,6 +206,16 @@ def diff_definitions(old_source: bytes | None, new_source: bytes | None, module:
         else:
             deleted.append(q(key))
     return FunctionChanges(tuple(changed), tuple(added), tuple(deleted))
+
+
+def diff_definitions(old_source: bytes | None, new_source: bytes | None, module: str) -> FunctionChanges:
+    """Compare one file before/after. None = file did not exist on that side.
+
+    Raises SyntaxError / ValueError if either side cannot be parsed.
+    """
+    old = extract_definitions(old_source) if old_source is not None else _EMPTY
+    new = extract_definitions(new_source) if new_source is not None else _EMPTY
+    return diff_parsed(old, new, module)
 
 
 # --------------------------------------------------------------------------
@@ -208,6 +251,23 @@ class CodeAnalyzer:
         specs = [s for c in commits for o, n, _, _ in self._sides(c) for s in (o, n) if s]
         blobs = read_blobs(self.repo, specs)
 
+        # A file version is usually the "after" of one commit AND the "before"
+        # of the next: parse each distinct content only once.
+        parsed: dict[bytes, Definitions | Exception] = {}
+
+        def parse(src: bytes | None) -> Definitions:
+            if src is None:
+                return _EMPTY
+            if src not in parsed:
+                try:
+                    parsed[src] = extract_definitions(src)
+                except (SyntaxError, ValueError, RecursionError) as exc:
+                    parsed[src] = exc
+            got = parsed[src]
+            if isinstance(got, Exception):
+                raise got
+            return got
+
         result: dict[str, FunctionChanges] = {}
         for c in commits:
             changed: set[str] = set()
@@ -224,7 +284,7 @@ class CodeAnalyzer:
                     skipped.append(path)
                     continue
                 try:
-                    fc = diff_definitions(old_src, new_src, module)
+                    fc = diff_parsed(parse(old_src), parse(new_src), module)
                 except (SyntaxError, ValueError, RecursionError):
                     skipped.append(path)
                     continue
