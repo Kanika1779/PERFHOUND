@@ -33,7 +33,7 @@ pytest
 | 2 | Test fixture repo | done |
 | 3 | Range Resolver | done |
 | 4 | Local Git Provider | done |
-| 5 | Code Analyzer | - |
+| 5 | Code Analyzer | done |
 | 6 | Worktree Manager | - |
 | 7 | Cache (SQLite) | - |
 | 8 | Snapshot Store | - |

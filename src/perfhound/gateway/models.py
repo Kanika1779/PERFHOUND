@@ -130,6 +130,9 @@ class CandidateCommit:
     position: 0 = first commit after `good`, increasing towards `bad`.
     changed/added/deleted_functions: fully-qualified names such as
         "sympy.core.basic.Basic.__hash__" (filled by the Code Analyzer, Step 5).
+    unanalyzed_files: Python files the analyzer could NOT parse (syntax error,
+        too large...). Non-empty means the function lists may be incomplete -
+        "no functions changed" and "unknown" are different things.
     pr: None when there is no internet / no token / repo not on GitHub.
         Consumers MUST handle None.
     """
@@ -144,6 +147,7 @@ class CandidateCommit:
     changed_functions: tuple[str, ...] = ()
     added_functions: tuple[str, ...] = ()
     deleted_functions: tuple[str, ...] = ()
+    unanalyzed_files: tuple[str, ...] = ()
     diff: str = ""
     diff_truncated: bool = False
     pr: PRInfo | None = None
@@ -159,7 +163,7 @@ class CandidateCommit:
         if self.source not in SOURCES:
             raise ValueError(f"source must be one of {sorted(SOURCES)}, got {self.source!r}")
         # Accept lists from callers but always store tuples (immutability).
-        for name in ("files", "changed_functions", "added_functions", "deleted_functions"):
+        for name in ("files", "changed_functions", "added_functions", "deleted_functions", "unanalyzed_files"):
             object.__setattr__(self, name, tuple(getattr(self, name)))
 
     @property
@@ -186,6 +190,7 @@ class CandidateCommit:
             "changed_functions": list(self.changed_functions),
             "added_functions": list(self.added_functions),
             "deleted_functions": list(self.deleted_functions),
+            "unanalyzed_files": list(self.unanalyzed_files),
             "diff": self.diff,
             "diff_truncated": self.diff_truncated,
             "pr": self.pr.to_dict() if self.pr else None,
@@ -208,6 +213,7 @@ class CandidateCommit:
             changed_functions=tuple(d.get("changed_functions", ())),
             added_functions=tuple(d.get("added_functions", ())),
             deleted_functions=tuple(d.get("deleted_functions", ())),
+            unanalyzed_files=tuple(d.get("unanalyzed_files", ())),
             diff=d.get("diff", ""),
             diff_truncated=d.get("diff_truncated", False),
             pr=PRInfo.from_dict(d["pr"]) if d.get("pr") else None,

@@ -62,3 +62,41 @@ def run_git(
 def git_out(repo: str | Path, *args: str) -> str:
     """Run git and return stdout with surrounding whitespace stripped."""
     return run_git(repo, *args).stdout.strip()
+
+
+def run_git_bytes(repo: str | Path, *args: str, input: bytes | None = None) -> bytes:
+    """Like run_git but binary-safe (file contents may be any encoding)."""
+    cmd = [git_executable(), *args]
+    env = dict(os.environ)
+    env.update(_GIT_ENV_OVERRIDES)
+    proc = subprocess.run(cmd, cwd=str(repo), env=env, input=input, capture_output=True)
+    if proc.returncode != 0:
+        raise GitCommandError(list(args), proc.returncode, proc.stderr.decode("utf-8", "replace"))
+    return proc.stdout
+
+
+def read_blobs(repo: str | Path, specs: list[str]) -> dict[str, bytes | None]:
+    """Fetch many file contents in ONE `git cat-file --batch` process.
+
+    specs are "<commit>:<path>" strings; value is None when missing.
+    """
+    specs = [s for s in dict.fromkeys(specs) if "\n" not in s]
+    if not specs:
+        return {}
+    out = run_git_bytes(repo, "cat-file", "--batch", input=("\n".join(specs) + "\n").encode("utf-8"))
+    result: dict[str, bytes | None] = {}
+    pos = 0
+    for spec in specs:
+        nl = out.index(b"\n", pos)
+        header = out[pos:nl].decode("utf-8", "replace").split()
+        pos = nl + 1
+        if len(header) == 3 and header[1] == "blob":
+            size = int(header[2])
+            result[spec] = out[pos:pos + size]
+            pos += size + 1  # content is followed by a newline
+        elif len(header) == 3:          # tree/commit: skip its content too
+            pos += int(header[2]) + 1
+            result[spec] = None
+        else:                            # "<spec> missing" / "ambiguous"
+            result[spec] = None
+    return result

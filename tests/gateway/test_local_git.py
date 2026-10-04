@@ -35,7 +35,7 @@ def test_metadata(fixture_repo, candidates):
     assert c.author == "Test Author"
     assert c.timestamp.utcoffset() == timedelta(hours=5, minutes=30)
     assert c.source == "local" and c.pr is None
-    assert c.changed_functions == ()  # filled in Step 5
+    assert c.changed_functions == ("calc.add",)  # from the Code Analyzer (Step 5)
 
 
 def test_normal_change(fixture_repo, candidates):
