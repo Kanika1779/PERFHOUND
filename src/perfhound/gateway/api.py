@@ -16,6 +16,7 @@ from .analyzer import CodeAnalyzer
 from .local_git import DEFAULT_MAX_DIFF_CHARS, DEFAULT_MAX_DIFF_LINES, LocalGitProvider
 from .models import CandidateCommit
 from .range import CommitRange, find_repo_root, resolve_range
+from .worktree import WorktreeManager
 
 
 class Gateway:
@@ -42,3 +43,11 @@ class Gateway:
         commit_range = self.resolve(good, bad, **range_options)
         commits = self._local.get_commits(commit_range)
         return self._analyzer.enrich(commits) if analyze else commits
+
+    def worktree(self, **options) -> WorktreeManager:
+        """A private checkout area for benchmarking; never touches the user's folder.
+
+            with gw.worktree() as wt:
+                path = wt.checkout(sha)
+        """
+        return WorktreeManager(self.repo, **options)

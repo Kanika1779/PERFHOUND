@@ -12,7 +12,11 @@ Finds the commit that made your code slow. Local-first CLI + VS Code extension.
 ```python
 from perfhound.gateway import Gateway
 
-candidates = Gateway("path/to/repo").get_candidates("v1.2", "HEAD")  # offline
+gw = Gateway("path/to/repo")
+candidates = gw.get_candidates("v1.2", "HEAD")   # offline, incl. changed functions
+
+with gw.worktree() as wt:                         # private checkout in the temp dir
+    folder = wt.checkout(candidates[3].sha)       # your folder is never touched
 ```
 
 ## Dev setup
@@ -34,7 +38,7 @@ pytest
 | 3 | Range Resolver | done |
 | 4 | Local Git Provider | done |
 | 5 | Code Analyzer | done |
-| 6 | Worktree Manager | - |
+| 6 | Worktree Manager | done |
 | 7 | Cache (SQLite) | - |
 | 8 | Snapshot Store | - |
 | 9 | GitHub Provider | - |
