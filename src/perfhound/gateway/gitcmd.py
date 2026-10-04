@@ -33,6 +33,7 @@ def run_git(
     *args: str,
     check: bool = True,
     ok_codes: tuple[int, ...] = (0,),
+    input: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run `git <args>` inside `repo` and return the completed process.
 
@@ -46,6 +47,7 @@ def run_git(
     proc = subprocess.run(
         cmd,
         cwd=str(repo),
+        input=input,
         env=env,
         capture_output=True,
         text=True,

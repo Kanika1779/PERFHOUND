@@ -2,6 +2,19 @@
 
 Finds the commit that made your code slow. Local-first CLI + VS Code extension.
 
+## Requirements
+
+- Python >= 3.10
+- git >= 2.31 (uses `--diff-merges=first-parent`)
+
+## Usage (so far)
+
+```python
+from perfhound.gateway import Gateway
+
+candidates = Gateway("path/to/repo").get_candidates("v1.2", "HEAD")  # offline
+```
+
 ## Dev setup
 
 ```bash
@@ -19,7 +32,7 @@ pytest
 | 1 | Data model (`CandidateCommit`) | done |
 | 2 | Test fixture repo | done |
 | 3 | Range Resolver | done |
-| 4 | Local Git Provider | - |
+| 4 | Local Git Provider | done |
 | 5 | Code Analyzer | - |
 | 6 | Worktree Manager | - |
 | 7 | Cache (SQLite) | - |
