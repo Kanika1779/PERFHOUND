@@ -16,7 +16,7 @@ pytest
 | Step | What | Status |
 |---|---|---|
 | 0 | Project setup | done |
-| 1 | Data model (`CandidateCommit`) | - |
+| 1 | Data model (`CandidateCommit`) | done |
 | 2 | Test fixture repo | - |
 | 3 | Range Resolver | - |
 | 4 | Local Git Provider | - |
