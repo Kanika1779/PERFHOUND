@@ -18,7 +18,7 @@ pytest
 | 0 | Project setup | done |
 | 1 | Data model (`CandidateCommit`) | done |
 | 2 | Test fixture repo | done |
-| 3 | Range Resolver | - |
+| 3 | Range Resolver | done |
 | 4 | Local Git Provider | - |
 | 5 | Code Analyzer | - |
 | 6 | Worktree Manager | - |
