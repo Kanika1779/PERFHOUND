@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -161,7 +162,12 @@ def extract_definitions(source: bytes) -> Definitions:
 
     Raises SyntaxError / ValueError when the source cannot be parsed.
     """
-    tree = ast.parse(source)
+    with warnings.catch_warnings():
+        # analyzed repos contain e.g. "\d" in normal strings: Python 3.12+ prints a
+        # SyntaxWarning per occurrence while parsing - noise for our users, not our problem
+        warnings.simplefilter("ignore", SyntaxWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
+        tree = ast.parse(source)
     lines = source.decode("utf-8", "replace").split("\n")
     entries: dict[str, _Entry] = {}
     classes: set[str] = set()

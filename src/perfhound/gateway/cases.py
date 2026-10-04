@@ -13,12 +13,16 @@ scheduler - it drops the culprit (and anything else that reveals it).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 CASE_SCHEMA_VERSION = 1
 
 LANGUAGES = frozenset({"python", "java"})
+METRIC_TYPES = frozenset({"wall_time", "regex", "json"})
+# What changed between good and bad: a slowdown (regression) or a speedup (e.g. an optimization).
+DIRECTIONS = frozenset({"slower", "faster"})
 # How trustworthy `culprit` is:
 #   injected - we created the regression ourselves (exact)
 #   reported - maintainers confirmed it (issue / PR / paper)
@@ -32,16 +36,30 @@ class BenchmarkSpec:
     """What to measure. `framework` decides which runner executes it."""
 
     name: str                       # e.g. "frame_methods.Apply.time_apply", "org.x.MyBench.run"
-    framework: str                  # "script" | "pytest-benchmark" | "asv" | "jmh"
-    command: str | None = None      # how to run it inside a checkout, if known
+    framework: str                  # "command" | "script" | "pytest-benchmark" | "asv" | "jmh"
+    command: str | None = None      # how to run it inside a checkout (shell command)
     workload: str | None = None     # inline workload source (SWE-fficiency)
     params: dict[str, Any] = field(default_factory=dict)
     unit: str = "seconds"
     higher_is_better: bool = False  # True for throughput (JMH thrpt mode)
+    setup: str | None = None        # build step run once per commit before measuring, e.g. "pip install -e ."
+    # How to read one sample:  {"type": "wall_time"}  (runner times the command, default)
+    #                          {"type": "regex", "pattern": "took ([0-9.]+) s"}
+    #                          {"type": "json", "key": "mean"}   (command prints JSON)
+    metric: dict[str, Any] = field(default_factory=lambda: {"type": "wall_time"})
 
     def __post_init__(self) -> None:
         if not self.name or not self.framework:
             raise ValueError("BenchmarkSpec needs name and framework")
+        kind = self.metric.get("type")
+        if kind not in METRIC_TYPES:
+            raise ValueError(f"metric type must be one of {sorted(METRIC_TYPES)}, got {kind!r}")
+        if kind == "regex":
+            pattern = self.metric.get("pattern", "")
+            if re.compile(pattern).groups != 1:
+                raise ValueError("regex metric needs exactly one capture group for the number")
+        if kind == "json" and not self.metric.get("key"):
+            raise ValueError("json metric needs a 'key'")
 
 
 @dataclass(frozen=True)
@@ -64,17 +82,21 @@ class RegressionCase:
     source: str                     # adapter name
     repo: str                       # git URL or local path
     language: str
-    good: str                       # last known-fast commit (SHA preferred)
-    bad: str                        # first known-slow commit
+    good: str                       # commit BEFORE the change (fast for a regression)
+    bad: str                        # commit AFTER the change
     culprit: str | None = None
     ground_truth: str = "none"
     regression_type: str | None = None
-    expected_magnitude: float | None = None   # relative slowdown, 0.15 = 15 % slower
+    # relative change of the measured time, |t_bad - t_good| / t_good  (0.15 = 15 % slower / faster)
+    expected_magnitude: float | None = None
     benchmark: BenchmarkSpec | None = None
     observations: tuple[Observation, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+    direction: str = "slower"       # "slower" (regression) or "faster" (speedup)
 
     def __post_init__(self) -> None:
+        if self.direction not in DIRECTIONS:
+            raise ValueError(f"direction must be one of {sorted(DIRECTIONS)}, got {self.direction!r}")
         for name in ("case_id", "source", "repo", "good", "bad"):
             if not getattr(self, name):
                 raise ValueError(f"RegressionCase.{name} is required")
@@ -108,9 +130,11 @@ class RegressionCase:
             "language": self.language, "good": self.good, "bad": self.bad,
             "culprit": self.culprit, "ground_truth": self.ground_truth,
             "regression_type": self.regression_type, "expected_magnitude": self.expected_magnitude,
+            "direction": self.direction,
             "benchmark": None if b is None else {
                 "name": b.name, "framework": b.framework, "command": b.command, "workload": b.workload,
                 "params": b.params, "unit": b.unit, "higher_is_better": b.higher_is_better,
+                "setup": b.setup, "metric": b.metric,
             },
             "observations": [{"commit": o.commit, "values": list(o.values)} for o in self.observations],
             "metadata": self.metadata,
@@ -126,10 +150,12 @@ class RegressionCase:
             good=d["good"], bad=d["bad"], culprit=d.get("culprit"),
             ground_truth=d.get("ground_truth", "none"), regression_type=d.get("regression_type"),
             expected_magnitude=d.get("expected_magnitude"),
+            direction=d.get("direction", "slower"),
             benchmark=None if not b else BenchmarkSpec(
                 name=b["name"], framework=b["framework"], command=b.get("command"), workload=b.get("workload"),
                 params=b.get("params") or {}, unit=b.get("unit", "seconds"),
                 higher_is_better=b.get("higher_is_better", False),
+                setup=b.get("setup"), metric=b.get("metric") or {"type": "wall_time"},
             ),
             observations=tuple(Observation(o["commit"], tuple(o["values"])) for o in d.get("observations", ())),
             metadata=d.get("metadata") or {},

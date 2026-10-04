@@ -212,3 +212,10 @@ def test_read_blobs_handles_missing_and_binary(fixture_repo):
     assert got[f"{head}:mathops.py"].startswith(b"def add")
     assert got[f"{head}:nope.py"] is None
     assert got[f"{head}:data.bin"] == bytes(range(256))
+
+
+def test_parsing_old_code_prints_no_syntax_warnings(recwarn):
+    """Real repos (sympy, dask) contain '\\d' in plain strings: Python 3.12+ warns while parsing."""
+    fc = diff('def f():\n    return "\\d+"\n', 'def f():\n    return "\\d*"\n')
+    assert fc.changed == ("m.f",)
+    assert not [w for w in recwarn if issubclass(w.category, (SyntaxWarning, DeprecationWarning))]

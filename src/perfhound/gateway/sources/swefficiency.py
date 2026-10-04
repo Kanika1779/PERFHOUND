@@ -68,6 +68,8 @@ class SweTask:
 
 @dataclass
 class InjectionFailure:
+    """Why a case could not be built (used by both the injected and the real-change builders)."""
+
     instance_id: str
     reason: str                      # short_history | empty_patch | revert_conflict | replay_conflict | pr_not_found
     detail: str = ""
@@ -408,5 +410,108 @@ class AprclInstancesAdapter:
             )
 
 
+# ---------------------------------------------------------------- real changes (no injection)
+
+def build_real_change_case(
+    repo: Path, task: SweTask, n: int, position_k: int, *, ref: str | None = None, mainline: list[str] | None = None,
+    repo_ref: str | None = None,
+) -> RegressionCase | InjectionFailure:
+    """A window of n real main-line commits that contains the expert optimization at position k.
+
+    Nothing is written to the repository. good = the commit k positions before the
+    optimization O, candidates = the next n main-line commits (O is the k-th), and the
+    change to find is a SPEEDUP (direction "faster"). Ground truth kind is "reported":
+    O is the dataset's verified optimization, but other commits in the window may also
+    move this workload - Step 4 (benchmark validation) checks every case.
+
+    repo_ref is what the case records as its repo (normally the GitHub URL, so a cases
+    file works on any machine); defaults to the local path.
+    """
+    if not 1 <= position_k <= n:
+        raise ValueError("position_k must be in [1, n]")
+    instance_id = f"{task.instance_id}__real_n{n}_k{position_k:02d}"
+    ref = ref or default_branch(repo)
+    try:
+        opt = find_pr_commit(repo, task.pr_number, ref)
+    except GatewayError as exc:
+        return InjectionFailure(instance_id, "pr_not_found", str(exc))
+    line = mainline if mainline is not None else _git(repo, "rev-list", "--first-parent", "--reverse", ref).split()
+    idx = line.index(opt)
+    start = idx - position_k                      # index of good
+    if start < 0 or start + n >= len(line):
+        return InjectionFailure(instance_id, "short_history",
+                                f"need {position_k} commits before and {n - position_k} after {opt[:10]}")
+    good, candidates = line[start], line[start + 1:start + n + 1]
+    speedup = task.expert_speedup
+    return RegressionCase(
+        case_id=f"swefficiency-real:{instance_id}", source="swefficiency-real", repo=repo_ref or str(repo),
+        language="python",
+        good=good, bad=candidates[-1], culprit=opt, ground_truth="reported",
+        regression_type="expert_optimization", direction="faster",
+        expected_magnitude=(1.0 - 1.0 / speedup) if speedup else None,   # 1.84x faster -> time -45.7 %
+        benchmark=BenchmarkSpec(name=task.instance_id, framework="script", workload=task.workload),
+        metadata={
+            "task": task.instance_id, "upstream_repo": task.repo, "pr_number": task.pr_number, "n": n,
+            "workload_origin": task.workload_origin, "expert_speedup": speedup, "truth_position": position_k,
+        },
+    )
+
+
+class SwefficiencyRealAdapter:
+    """Real performance-change cases from SWE-fficiency - no injection, no git writes.
+
+        open_source("swefficiency-real", tasks_file="data/tasks/swefficiency_pure_python.json",
+                    n=20, positions_per_task=1, seed=0)
+    """
+
+    name = "swefficiency-real"
+
+    def __init__(
+        self, *, tasks_file: str | Path | None = None, hf: bool = False,
+        repos: tuple[str, ...] | None = PURE_PYTHON_REPOS, ids: list[str] | None = None,
+        n: int = 20, positions: list[int] | None = None, positions_per_task: int = 1, seed: int = 0,
+        fetcher: RepoFetcher | None = None,
+        repo_url: Callable[[str], str] = lambda r: f"https://github.com/{r}", ref: str | None = None,
+    ) -> None:
+        if tasks_file is None and not hf:
+            raise ValueError("give tasks_file=... or hf=True")
+        self.tasks_file, self.hf, self.repos, self.ids = tasks_file, hf, repos, ids
+        self.n, self.positions, self.per_task, self.seed = n, positions, positions_per_task, seed
+        self.fetcher = fetcher or RepoFetcher()
+        self.repo_url, self.ref = repo_url, ref
+        self.failures: list[InjectionFailure] = []
+
+    def tasks(self) -> list[SweTask]:
+        tasks = load_hf(self.repos) if self.hf else load_task_file(self.tasks_file)
+        if self.repos:
+            tasks = [t for t in tasks if t.repo in self.repos]
+        if self.ids:
+            tasks = [t for t in tasks if t.instance_id in set(self.ids)]
+        return sorted(tasks, key=lambda t: t.instance_id)
+
+    def cases(self, limit: int | None = None) -> Iterator[RegressionCase]:
+        rng = random.Random(self.seed)          # same seed -> same positions -> same cases
+        produced = 0
+        mainlines: dict[Path, tuple[str, list[str]]] = {}
+        for task in self.tasks():
+            url = self.repo_url(task.repo)
+            repo = self.fetcher.fetch(url)
+            if repo not in mainlines:
+                ref = self.ref or default_branch(repo)
+                mainlines[repo] = (ref, _git(repo, "rev-list", "--first-parent", "--reverse", ref).split())
+            ref, line = mainlines[repo]
+            ks = self.positions or rng.sample(range(1, self.n + 1), self.per_task)
+            for k in ks:
+                if limit is not None and produced >= limit:
+                    return
+                built = build_real_change_case(repo, task, self.n, k, ref=ref, mainline=line, repo_ref=url)
+                if isinstance(built, InjectionFailure):
+                    self.failures.append(built)
+                    continue
+                produced += 1
+                yield built
+
+
 register_source("swefficiency", SwefficiencyAdapter)
+register_source("swefficiency-real", SwefficiencyRealAdapter)
 register_source("aprcl-instances", AprclInstancesAdapter)

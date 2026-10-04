@@ -8,7 +8,8 @@ came from - adding a source never changes the gateway or the localizer.
     for case in open_source("json", path="cases.json").cases():
         ...
 
-Built in:  "json"  - cases in Perfhound's own schema (JSON list or JSONL)
+Built in:  "yaml"  - perfhound.yaml: any repo + good + bad + setup + benchmark
+           "json"  - cases in Perfhound's own schema (JSON list or JSONL)
            "git"   - one ad-hoc case: repo URL/path + good + bad
 Dataset adapters (SWE-fficiency, asv-runner, JMH ...) register the same way.
 """
@@ -98,7 +99,7 @@ register_source("git", GitRangeAdapter)
 
 def _load_builtin_adapters() -> None:
     """Dataset adapters register themselves on import."""
-    from . import swefficiency  # noqa: F401
+    from . import swefficiency, yaml_spec  # noqa: F401
 
 
 _load_builtin_adapters()

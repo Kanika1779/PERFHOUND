@@ -74,7 +74,8 @@ def local_dir_for(url: str, base: Path) -> Path:
 
 class RepoFetcher:
     def __init__(self, base_dir: str | Path | None = None, *, filter_blobs: bool = True) -> None:
-        self.base_dir = Path(base_dir) if base_dir else default_repos_dir()
+        # absolute: git runs with other working directories, a relative path would be resolved twice
+        self.base_dir = (Path(base_dir) if base_dir else default_repos_dir()).resolve()
         self.filter_blobs = filter_blobs
 
     def fetch(self, repo: str) -> Path:

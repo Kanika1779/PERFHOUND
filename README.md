@@ -49,6 +49,7 @@ pytest
 | Step | What | Status |
 |---|---|---|
 | A | Analyzer plug-ins + Java (tree-sitter) | done |
+| 0 | perfhound.yaml + CLI + SWE-fficiency real-change cases | done |
 | B | RegressionCase + Source Adapters + Repo Fetcher | done |
 | C | Adapters: SWE-fficiency (done), pandas asv-runner, ICPE JMH, Zenodo | in progress |
 | D | Document builder for RAG | - |

@@ -119,3 +119,11 @@ def test_stale_half_clones_are_removed(remote, tmp_path):
     os.utime(old, (time.time() - 7 * 3600,) * 2)
     f.fetch(remote.url)
     assert not old.exists() and young.exists()
+
+
+def test_relative_base_dir_works(remote, tmp_path, monkeypatch):
+    """Found on the first real multi-repo run: base_dir="repos" cloned into repos/repos/..."""
+    monkeypatch.chdir(tmp_path)
+    path = RepoFetcher("repos").fetch(remote.url)
+    assert path.is_absolute() and (path / ".git").exists()
+    assert path == (tmp_path / "repos").resolve() / path.relative_to((tmp_path / "repos").resolve())
