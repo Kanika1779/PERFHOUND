@@ -430,6 +430,8 @@ def build_real_change_case(
     if not 1 <= position_k <= n:
         raise ValueError("position_k must be in [1, n]")
     instance_id = f"{task.instance_id}__real_n{n}_k{position_k:02d}"
+    if not (task.workload or "").strip():
+        return InjectionFailure(instance_id, "no_workload", "task has no workload script - nothing to measure")
     ref = ref or default_branch(repo)
     try:
         opt = find_pr_commit(repo, task.pr_number, ref)

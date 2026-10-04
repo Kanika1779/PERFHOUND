@@ -158,3 +158,11 @@ def test_real_change_positions_are_reproducible(tmp_path):
         return [c.case_id for c in a.cases()] + [f.instance_id for f in a.failures]
 
     assert ids(7) == ids(7)
+
+
+def test_task_without_workload_is_skipped(tmp_path):
+    """Found in the real data: one SWE-fficiency task (xarray-7374) has no workload."""
+    upstream = build_merge_style_upstream(tmp_path / "up")
+    empty = SweTask(TASK.instance_id, TASK.repo, TASK.pr_number, workload="", expert_speedup=2.0)
+    failure = build_real_change_case(upstream, empty, n=4, position_k=1, ref="main")
+    assert failure.reason == "no_workload"
