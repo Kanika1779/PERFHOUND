@@ -43,3 +43,12 @@ pytest
 | 8 | Snapshot Store | done |
 | 9 | GitHub Provider | - |
 | 10 | Validation on a real repo | - |
+
+## Phase 2: any source, Python + Java
+
+| Step | What | Status |
+|---|---|---|
+| A | Analyzer plug-ins + Java (tree-sitter) | done |
+| B | RegressionCase + Source Adapters + Repo Fetcher | - |
+| C | Adapters: SWE-fficiency, pandas asv-runner, ICPE JMH, Zenodo, generic | - |
+| D | Document builder for RAG | - |

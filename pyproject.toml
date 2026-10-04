@@ -8,7 +8,10 @@ version = "0.0.1"
 description = "Find the commit that made your code slow: LLM-guided, noise-aware performance-regression localization."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "tree-sitter>=0.23",
+    "tree-sitter-java>=0.23",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

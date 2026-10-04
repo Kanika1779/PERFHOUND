@@ -1,4 +1,9 @@
-"""Code Analyzer (gateway part 6): which Python functions did a commit change?
+"""Code Analyzer (gateway part 6): which functions did a commit change?
+
+Languages: Python (this file, stdlib `ast`) and Java (lang_java.py,
+tree-sitter). Add a language = one class with `extensions`, `parse()` and
+`qualifier()`; see PythonSupport.
+
 
 Approach: parse the file BEFORE (first parent) and AFTER the commit with
 Python's `ast` module and compare each function's normalized syntax tree.
@@ -31,13 +36,13 @@ import ast
 import copy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from .gitcmd import read_blobs
 from .models import CandidateCommit
 
 DEFAULT_MAX_FILE_BYTES = 2_000_000
-ANALYZER_VERSION = 1   # bump when analysis output changes -> old cache entries are ignored
+ANALYZER_VERSION = 2   # v2: Java support. Bump when analysis output changes -> old cache entries are ignored
 _FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -106,24 +111,28 @@ def _fingerprint(node) -> str:
 @dataclass(frozen=True)
 class _Entry:
     raw: str            # exact source text (fast path: equal text => equal code)
-    node: ast.AST       # fingerprinted lazily, only when the raw text differs
+    node: Any           # syntax node, fingerprinted lazily, only when the raw text differs
 
 
 @dataclass
 class Definitions:
-    """Everything defined in one file.
+    """Everything defined in one file (any language).
 
-    entries keys: 'func', 'Class.method', 'outer.<locals>.inner',
+    Python keys: 'func', 'Class.method', 'outer.<locals>.inner',
     'Class' (class-level code only) and '<module>' (module-level code only).
+    Java keys are already fully qualified, see lang_java.py.
     """
 
     entries: dict[str, _Entry]
     classes: frozenset[str]
-    _fps: dict[str, str] = field(default_factory=dict)
+    fingerprint_fn: Callable[[Any], str] = field(default=None, repr=False)   # type: ignore[assignment]
+    namespace: str = ""            # Java package; unused for Python
+    _fps: dict[str, str] = field(default_factory=dict, repr=False)
 
     def fingerprint(self, key: str) -> str:
         if key not in self._fps:
-            self._fps[key] = _fingerprint(self.entries[key].node)
+            fn = self.fingerprint_fn or _fingerprint
+            self._fps[key] = fn(self.entries[key].node)
         return self._fps[key]
 
     @property
@@ -181,17 +190,21 @@ def extract_definitions(source: bytes) -> Definitions:
     residual = _residual(tree.body)
     entries["<module>"] = _Entry("\x00".join(text(s) for s in residual),
                                  ast.Module(body=residual, type_ignores=[]))
-    return Definitions(entries, frozenset(classes))
+    return Definitions(entries, frozenset(classes), _fingerprint)
 
 
 _EMPTY = Definitions({}, frozenset())
 
 
-def diff_parsed(old: Definitions, new: Definitions, module: str) -> FunctionChanges:
-    classes = old.classes | new.classes
+def python_qualifier(module: str) -> Callable[[str], str]:
+    return lambda key: f"{module}.{key}" if module else key
 
-    def q(key: str) -> str:
-        return f"{module}.{key}" if module else key
+
+def diff_parsed(old: Definitions, new: Definitions, qualify: Callable[[str], str] | str) -> FunctionChanges:
+    """Compare two parsed versions of one file. `qualify` turns a key into
+    the reported name (a plain string is treated as a Python module name)."""
+    classes = old.classes | new.classes
+    q = python_qualifier(qualify) if isinstance(qualify, str) else qualify
 
     changed, added, deleted = [], [], []
     for key in sorted(set(old.entries) | set(new.entries)):
@@ -222,48 +235,77 @@ def diff_definitions(old_source: bytes | None, new_source: bytes | None, module:
 # git-backed analyzer
 # --------------------------------------------------------------------------
 
+class PythonSupport:
+    """Python: `ast` from the standard library; names from the file path."""
+
+    name = "python"
+    extensions = (".py",)
+
+    def parse(self, source: bytes) -> Definitions:
+        return extract_definitions(source)
+
+    def qualifier(self, path: str, old: Definitions, new: Definitions) -> Callable[[str], str]:
+        return python_qualifier(path_to_module(path))
+
+
+def default_languages() -> list:
+    langs: list = [PythonSupport()]
+    from .lang_java import JavaSupport   # imported lazily: needs tree-sitter
+    langs.append(JavaSupport())
+    return langs
+
+
 class CodeAnalyzer:
     """Fills changed/added/deleted_functions for CandidateCommits.
 
-    All needed file versions for all commits are fetched with ONE
-    `git cat-file --batch` process.
+    Language is chosen by file extension (see `languages`). All needed file
+    versions for all commits are fetched with ONE `git cat-file --batch`.
     """
 
-    def __init__(self, repo: str | Path, *, max_file_bytes: int = DEFAULT_MAX_FILE_BYTES) -> None:
+    def __init__(self, repo: str | Path, *, max_file_bytes: int = DEFAULT_MAX_FILE_BYTES, languages=None) -> None:
         self.repo = Path(repo)
         self.max_file_bytes = max_file_bytes
+        self.languages = list(languages) if languages is not None else default_languages()
+        self._by_ext = {ext: lang for lang in self.languages for ext in lang.extensions}
 
-    @staticmethod
-    def _sides(c: CandidateCommit):
-        """(old_spec | None, new_spec | None, module, display_path) per Python file."""
+    def language_for(self, path: str):
+        for ext, lang in self._by_ext.items():
+            if path.endswith(ext):
+                return lang
+        return None
+
+    def _sides(self, c: CandidateCommit):
+        """(language, old_spec | None, new_spec | None, naming_path) per supported source file."""
         for f in c.files:
             old_path = f.old_path or f.path
-            if not (f.path.endswith(".py") or old_path.endswith(".py")) or f.is_binary:
+            lang = self.language_for(f.path) or self.language_for(old_path)
+            if lang is None or f.is_binary:
                 continue
             old_spec = None if f.status == "A" else f"{c.parent}:{old_path}"
             new_spec = None if f.status == "D" else f"{c.sha}:{f.path}"
-            # renamed files are compared under the NEW module name, so a pure
-            # rename reports no function changes
-            module = path_to_module(f.path if f.path.endswith(".py") else old_path)
-            yield old_spec, new_spec, module, f.path
+            # renamed files are named after the NEW path, so a pure rename
+            # reports no function changes
+            naming_path = f.path if self.language_for(f.path) is lang else old_path
+            yield lang, old_spec, new_spec, naming_path
 
     def analyze(self, commits: Sequence[CandidateCommit]) -> dict[str, FunctionChanges]:
-        specs = [s for c in commits for o, n, _, _ in self._sides(c) for s in (o, n) if s]
+        specs = [s for c in commits for _, o, n, _ in self._sides(c) for s in (o, n) if s]
         blobs = read_blobs(self.repo, specs)
 
         # A file version is usually the "after" of one commit AND the "before"
         # of the next: parse each distinct content only once.
-        parsed: dict[bytes, Definitions | Exception] = {}
+        parsed: dict[tuple[str, bytes], Definitions | Exception] = {}
 
-        def parse(src: bytes | None) -> Definitions:
+        def parse(lang, src: bytes | None) -> Definitions:
             if src is None:
                 return _EMPTY
-            if src not in parsed:
+            key = (lang.name, src)
+            if key not in parsed:
                 try:
-                    parsed[src] = extract_definitions(src)
+                    parsed[key] = lang.parse(src)
                 except (SyntaxError, ValueError, RecursionError) as exc:
-                    parsed[src] = exc
-            got = parsed[src]
+                    parsed[key] = exc
+            got = parsed[key]
             if isinstance(got, Exception):
                 raise got
             return got
@@ -274,7 +316,7 @@ class CodeAnalyzer:
             added: set[str] = set()
             deleted: set[str] = set()
             skipped: list[str] = []
-            for old_spec, new_spec, module, path in self._sides(c):
+            for lang, old_spec, new_spec, path in self._sides(c):
                 old_src = blobs.get(old_spec) if old_spec else None
                 new_src = blobs.get(new_spec) if new_spec else None
                 if (old_spec and old_src is None) or (new_spec and new_src is None):
@@ -284,7 +326,8 @@ class CodeAnalyzer:
                     skipped.append(path)
                     continue
                 try:
-                    fc = diff_parsed(parse(old_src), parse(new_src), module)
+                    old_defs, new_defs = parse(lang, old_src), parse(lang, new_src)
+                    fc = diff_parsed(old_defs, new_defs, lang.qualifier(path, old_defs, new_defs))
                 except (SyntaxError, ValueError, RecursionError):
                     skipped.append(path)
                     continue
