@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .errors import GatewayError
-from .gitcmd import run_git
+from .gitcmd import ensure_objects, is_partial_clone, run_git
 from .models import CandidateCommit, FileChange
 from .range import CommitRange
 
@@ -145,6 +145,37 @@ def read_commit_info(repo: str | Path, shas: Sequence[str]) -> list[RawCommitInf
 
 
 # --------------------------------------------------------------------------
+# pass 0 (partial clones only): prefetch every blob the other passes need
+# --------------------------------------------------------------------------
+
+def changed_blob_ids(repo: str | Path, shas: Sequence[str]) -> list[str]:
+    """Old and new blob ids of every file changed by `shas` (vs first parent).
+
+    Uses --raw WITHOUT rename detection: that needs only commits and trees,
+    which a blob:none clone has, so this call itself never downloads anything.
+    """
+    if not shas:
+        return []
+    out = run_git(
+        repo, "log", "--no-walk=unsorted", "--stdin", "--no-renames", "--raw", "--no-abbrev",
+        "--diff-merges=first-parent", "--format=", input="\n".join(shas) + "\n",
+    ).stdout
+    oids: set[str] = set()
+    for line in out.splitlines():
+        if line.startswith(":"):
+            parts = line.split()
+            oids.update(parts[2:4])
+    return sorted(oids)
+
+
+def prefetch_blobs(repo: str | Path, shas: Sequence[str]) -> int:
+    """Batch-download the blobs `shas` touch, if `repo` is a partial clone."""
+    if not shas or not is_partial_clone(repo):
+        return 0
+    return ensure_objects(repo, changed_blob_ids(repo, shas))
+
+
+# --------------------------------------------------------------------------
 # pass 2: diffs
 # --------------------------------------------------------------------------
 
@@ -242,6 +273,7 @@ class LocalGitProvider:
         same positions it would have in the full list.
         """
         wanted = list(commit_range.shas if shas is None else shas)
+        self.prefetched = prefetch_blobs(self.repo, wanted)
         infos = read_commit_info(self.repo, wanted)
         diffs = read_diffs(self.repo, wanted, max_lines=self.max_diff_lines, max_chars=self.max_diff_chars)
         out = []

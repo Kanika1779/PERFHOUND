@@ -290,6 +290,9 @@ class CodeAnalyzer:
 
     def analyze(self, commits: Sequence[CandidateCommit]) -> dict[str, FunctionChanges]:
         specs = [s for c in commits for _, o, n, _ in self._sides(c) for s in (o, n) if s]
+        if specs:
+            from .local_git import prefetch_blobs   # no-op unless partial clone
+            prefetch_blobs(self.repo, [c.sha for c in commits if any(True for _ in self._sides(c))])
         blobs = read_blobs(self.repo, specs)
 
         # A file version is usually the "after" of one commit AND the "before"

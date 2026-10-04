@@ -5,9 +5,13 @@ calls git or GitHub directly (Facade + Adapter patterns).
 """
 
 from .api import Gateway
+from .cases import BenchmarkSpec, Observation, RegressionCase
 from .errors import GatewayError
+from .fetcher import FetchError, RepoFetcher
 from .models import CandidateCommit, FileChange, PRInfo
 from .range import CommitRange
 from .snapshot import Snapshot, SnapshotError
 
-__all__ = ["Gateway", "GatewayError", "CandidateCommit", "FileChange", "PRInfo", "CommitRange", "Snapshot", "SnapshotError"]
+__all__ = [
+    "BenchmarkSpec", "Observation", "RegressionCase", "FetchError", "RepoFetcher",
+    "Gateway", "GatewayError", "CandidateCommit", "FileChange", "PRInfo", "CommitRange", "Snapshot", "SnapshotError"]

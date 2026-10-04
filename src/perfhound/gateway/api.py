@@ -20,6 +20,9 @@ from pathlib import Path
 
 from .analyzer import ANALYZER_VERSION, CodeAnalyzer, FunctionChanges
 from .cache import Cache
+from .cases import RegressionCase
+from .errors import GatewayError
+from .fetcher import RepoFetcher
 from .gitcmd import run_git
 from .local_git import DEFAULT_MAX_DIFF_CHARS, DEFAULT_MAX_DIFF_LINES, LocalGitProvider
 from .models import SCHEMA_VERSION, CandidateCommit
@@ -80,6 +83,20 @@ class Gateway:
         if self._repo_id is None:
             self._repo_id = repo_identity(self.repo)
         return self._repo_id
+
+    @classmethod
+    def for_case(cls, case: RegressionCase, *, fetcher: RepoFetcher | None = None, **options) -> "Gateway":
+        """Gateway on the case's repository (cloned on first use), with good/bad present locally."""
+        fetcher = fetcher or RepoFetcher()
+        path = fetcher.fetch(case.repo)
+        missing = fetcher.ensure_commits(path, [case.good, case.bad])
+        if missing:
+            raise GatewayError(f"case {case.case_id}: commits not found in {case.repo}: {missing}")
+        return cls(path, **options)
+
+    def candidates_for(self, case: RegressionCase, **options) -> list[CandidateCommit]:
+        """Candidates for a case. Never uses the case's ground truth."""
+        return self.get_candidates(case.good, case.bad, **options)
 
     # -- main API --------------------------------------------------------------
 

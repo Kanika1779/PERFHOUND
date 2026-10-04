@@ -100,3 +100,37 @@ def read_blobs(repo: str | Path, specs: list[str]) -> dict[str, bytes | None]:
         else:                            # "<spec> missing" / "ambiguous"
             result[spec] = None
     return result
+
+
+# ---------------------------------------------------------------- partial clones
+
+def is_partial_clone(repo: str | Path) -> bool:
+    """True for `git clone --filter=...` repos, where file contents are fetched lazily."""
+    proc = run_git(repo, "config", "--get-regexp", r"^(remote\..*\.promisor|extensions\.partialclone)$", check=False)
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
+def ensure_objects(repo: str | Path, oids: list[str]) -> int:
+    """Download missing objects of a partial clone in ONE fetch. Returns how many were missing.
+
+    Without this, every `git log -p` / `cat-file` touching a missing blob makes
+    git fetch it on its own - one network round trip per file (jsoup, 150
+    commits: 134 s instead of ~5 s).
+    """
+    wanted = {o for o in oids if o and set(o) != {"0"}}
+    if not wanted or not is_partial_clone(repo):
+        return 0
+    # Lists only objects that are present locally; never triggers a fetch.
+    have = set(run_git(repo, "cat-file", "--batch-check=%(objectname)", "--batch-all-objects").stdout.split())
+    missing = sorted(wanted - have)
+    if not missing:
+        return 0
+    remote = run_git(repo, "config", "--get", "extensions.partialclone", check=False).stdout.strip() or "origin"
+    run_git(
+        repo,
+        "-c", "fetch.negotiationAlgorithm=noop",
+        "fetch", remote, "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no",
+        "--filter=blob:none", "--stdin",
+        input="\n".join(missing) + "\n",
+    )
+    return len(missing)
