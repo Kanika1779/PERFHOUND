@@ -6,6 +6,8 @@ Methods
   random        expected value of a random order (the floor)
   largest_diff  biggest change first (a cheap heuristic a reviewer would try)
   bm25:<fields> BM25 between the benchmark/workload and commit documents
+  dense:<model> cosine similarity of dense embeddings (with --embed-model, needs fastembed)
+  hybrid:<model> BM25 (meta) + dense fused with Reciprocal Rank Fusion
 
 Culprit is read from the case file ONLY to score the result; the ranking
 itself sees case.for_localizer() and the candidates.
@@ -24,7 +26,7 @@ from perfhound.gateway.cache import Cache
 from perfhound.gateway.fetcher import RepoFetcher
 from perfhound.rag.documents import build_commit_documents, build_query
 from perfhound.rag.metrics import RetrievalResult, mrr, random_mrr, random_recall_at, recall_at
-from perfhound.rag.retriever import rank_candidates
+from perfhound.rag.retriever import rank_candidates, rank_dense, rank_hybrid
 
 FIELD_SETS = {
     "message": ("message",),
@@ -44,14 +46,25 @@ def main() -> int:
     ap.add_argument("--repos", default=None, help="RepoFetcher base dir")
     ap.add_argument("--cache", default=None)
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--embed-model", action="append", default=[],
+                    help="dense model(s) to evaluate, e.g. BAAI/bge-small-en-v1.5 (repeatable)")
     args = ap.parse_args()
+
+    embedders = {}
+    for model in args.embed_model:
+        from perfhound.rag.embeddings import CachedEmbedder, FastEmbedEmbedder
+
+        print(f"loading {model} (downloads on first use) ...", flush=True)
+        embedders[model.split("/")[-1]] = CachedEmbedder(FastEmbedEmbedder(model))
 
     cases = [RegressionCase.from_json(l) for l in Path(args.cases).read_text(encoding="utf-8").splitlines() if l.strip()]
     cases = cases[: args.limit] if args.limit else cases
     fetcher = RepoFetcher(args.repos) if args.repos else RepoFetcher()
     cache = Cache(args.cache) if args.cache else True
 
-    results: dict[str, list[RetrievalResult]] = {m: [] for m in ["largest_diff", *[f"bm25:{f}" for f in FIELD_SETS]]}
+    methods = ["largest_diff", *[f"bm25:{f}" for f in FIELD_SETS]]
+    methods += [f"{kind}:{m}" for m in embedders for kind in ("dense", "hybrid")]
+    results: dict[str, list[RetrievalResult]] = {m: [] for m in methods}
     rows = []
     for case in cases:
         hidden = case.for_localizer()
@@ -71,8 +84,14 @@ def main() -> int:
             rank = next(r.rank for r in ranked if r.sha == case.culprit)
             results[f"bm25:{name}"].append(RetrievalResult(case.case_id, n, rank))
             row[f"bm25:{name}"] = rank
+        for short, emb in embedders.items():
+            for kind, ranker in (("dense", rank_dense), ("hybrid", rank_hybrid)):
+                ranked = ranker(query, docs, emb)
+                rank = next(r.rank for r in ranked if r.sha == case.culprit)
+                results[f"{kind}:{short}"].append(RetrievalResult(case.case_id, n, rank))
+                row[f"{kind}:{short}"] = rank
         rows.append(row)
-        print(f"{case.case_id:<55} " + " ".join(f"{k}={v}" for k, v in row.items() if k.startswith(("bm25:all", "largest"))),
+        print(f"{case.case_id:<55} " + " ".join(f"{k}={v}" for k, v in row.items() if k.startswith(("bm25:meta", "dense", "hybrid"))),
               flush=True)
 
     any_method = next(iter(results.values()))
@@ -90,11 +109,11 @@ def main() -> int:
     (out / "summary.json").write_text(json.dumps({"cases": len(cases), "table": table}, indent=2), encoding="utf-8")
 
     print(f"\n{len(cases)} cases, {any_method[0].n} candidates each (culprit known)\n")
-    head = f"{'method':<20}" + "".join(f"{'R@' + str(k):>8}" for k in KS) + f"{'MRR':>8}"
+    head = f"{'method':<32}" + "".join(f"{'R@' + str(k):>8}" for k in KS) + f"{'MRR':>8}"
     print(head)
     print("-" * len(head))
     for t in table:
-        print(f"{t['method']:<20}" + "".join(f"{t[f'recall@{k}']:>8.2f}" for k in KS) + f"{t['mrr']:>8.2f}")
+        print(f"{t['method']:<32}" + "".join(f"{t[f'recall@{k}']:>8.2f}" for k in KS) + f"{t['mrr']:>8.2f}")
     return 0
 
 

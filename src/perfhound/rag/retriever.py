@@ -34,3 +34,31 @@ def rank_candidates(query: str, documents: Sequence[CommitDocument], *, fields: 
     order = sorted(range(len(documents)), key=lambda i: (-scores[i], -documents[i].position))
     return [RankedCandidate(documents[i].sha, documents[i].position, scores[i], rank)
             for rank, i in enumerate(order, start=1)]
+
+
+def rank_dense(query: str, documents: Sequence[CommitDocument], embedder, *,
+               fields: Iterable[str] = ("message", "paths", "functions")) -> list[RankedCandidate]:
+    """Rank by cosine similarity between query and document embeddings."""
+    from .embeddings import cosine
+
+    fields = tuple(fields)
+    if not documents:
+        return []
+    doc_vecs = embedder.embed_documents([d.text(fields) for d in documents])
+    q = embedder.embed_query(query)
+    scores = [cosine(q, v) for v in doc_vecs]
+    order = sorted(range(len(documents)), key=lambda i: (-scores[i], -documents[i].position))
+    return [RankedCandidate(documents[i].sha, documents[i].position, scores[i], rank)
+            for rank, i in enumerate(order, start=1)]
+
+
+def rank_hybrid(query: str, documents: Sequence[CommitDocument], embedder, *,
+                bm25_fields: Iterable[str] = ("message", "paths", "functions"),
+                dense_fields: Iterable[str] = ("message", "paths", "functions"), k: int = 60) -> list[RankedCandidate]:
+    """BM25 + dense, fused with Reciprocal Rank Fusion."""
+    from .fusion import reciprocal_rank_fusion
+
+    return reciprocal_rank_fusion([
+        rank_candidates(query, documents, fields=bm25_fields),
+        rank_dense(query, documents, embedder, fields=dense_fields),
+    ], k=k)

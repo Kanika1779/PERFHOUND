@@ -51,6 +51,7 @@ pytest
 | A | Analyzer plug-ins + Java (tree-sitter) | done |
 | 0 | perfhound.yaml + CLI + SWE-fficiency real-change cases | done |
 | 1 | RAG v1: commit documents + BM25 + recall@k | done (results/retrieval_v1) |
+| 2a | RAG v2: dense embeddings (fastembed) + BM25/dense Reciprocal Rank Fusion | code done, real-model eval pending (run on a machine with Hugging Face access) |
 | B | RegressionCase + Source Adapters + Repo Fetcher | done |
 | C | Adapters: SWE-fficiency (done), pandas asv-runner, ICPE JMH, Zenodo | in progress |
 | D | Document builder for RAG | - |
