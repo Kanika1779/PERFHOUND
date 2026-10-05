@@ -1,7 +1,11 @@
 # RAG v2 (dense + hybrid) — retrieval results
 
 Run on Kanika's Windows laptop (Hugging Face is blocked in the cloud/VM):
-`python scripts/eval_retrieval.py data/cases_real_n20_seed0.jsonl --dense --out results/retrieval_v2`
+`python scripts/eval_retrieval.py data/cases_real_n20_seed0.jsonl --embed-model BAAI/bge-small-en-v1.5 --embed-model jinaai/jina-embeddings-v2-base-code --out results/retrieval_v2`
+
+> **Superseded until re-run:** the numbers below were measured BEFORE fix 41582b0. The query then contained the
+> benchmark name = SWE-fficiency instance id, i.e. the culprit PR number ("dask__dask-10356" vs "(#10356)" in the
+> commit message). BM25 rows are unaffected (digits are dropped by the tokenizer); dense/hybrid rows may be inflated.
 
 68 SWE-fficiency real-change cases, 20 candidates each, query = workload script. Rank of the culprit among 20.
 (v1 reported 67 cases: xarray-7374 was missing from that run. It is in the committed cases file; its BM25-meta
