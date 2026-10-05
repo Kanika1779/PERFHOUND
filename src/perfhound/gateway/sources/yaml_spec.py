@@ -2,6 +2,7 @@
 
     # perfhound.yaml
     repo: https://github.com/jhy/jsoup        # URL or local path (relative to this file)
+    # or instead of repo + good + bad:  compare: https://github.com/jhy/jsoup/compare/jsoup-1.17.1...master
     language: java                            # python | java
     good: jsoup-1.17.1                        # before the change
     bad: master                               # after the change
@@ -32,7 +33,7 @@ from ..cases import BenchmarkSpec, RegressionCase
 from ..fetcher import is_remote
 from . import register_source
 
-_CASE_KEYS = {"name", "repo", "language", "good", "bad", "direction", "benchmark", "culprit",
+_CASE_KEYS = {"name", "repo", "compare", "language", "good", "bad", "direction", "benchmark", "culprit",
               "ground_truth", "regression_type", "expected_magnitude", "metadata"}
 _BENCH_KEYS = {"name", "command", "setup", "metric", "unit", "higher_is_better", "framework", "params", "workload"}
 
@@ -74,6 +75,17 @@ def case_from_spec(raw: dict, *, base_dir: Path, index: int = 0, source: str = "
     if not isinstance(raw, dict):
         raise SpecError(f"{where}: must be a mapping")
     _check_keys(where, raw, _CASE_KEYS)
+    if raw.get("compare"):                   # compare: https://github.com/o/r/compare/GOOD...BAD
+        from ..github.errors import InvalidGitHubLink
+        from ..github.links import parse_compare
+
+        if any(raw.get(k) for k in ("repo", "good", "bad")):
+            raise SpecError(f"{where}: give either 'compare' or 'repo' + 'good' + 'bad', not both")
+        try:
+            ref, good, bad = parse_compare(str(raw["compare"]))
+        except InvalidGitHubLink as exc:
+            raise SpecError(f"{where}: {exc}") from None
+        raw = {**{k: v for k, v in raw.items() if k != "compare"}, "repo": ref.url, "good": good, "bad": bad}
     for key in ("repo", "good", "bad"):
         if not raw.get(key):
             raise SpecError(f"{where}: '{key}' is required")

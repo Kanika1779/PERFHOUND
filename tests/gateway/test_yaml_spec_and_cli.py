@@ -166,3 +166,18 @@ def test_task_without_workload_is_skipped(tmp_path):
     empty = SweTask(TASK.instance_id, TASK.repo, TASK.pr_number, workload="", expert_speedup=2.0)
     failure = build_real_change_case(upstream, empty, n=4, position_k=1, ref="main")
     assert failure.reason == "no_workload"
+
+
+def test_compare_link_is_a_case(tmp_path):
+    from perfhound.gateway.sources.yaml_spec import SpecError, load_spec
+
+    spec = tmp_path / "p.yaml"
+    spec.write_text("compare: https://github.com/jhy/jsoup/compare/jsoup-1.17.1...master\nbenchmark: java Bench\n")
+    (case,) = load_spec(spec)
+    assert (case.repo, case.good, case.bad) == ("https://github.com/jhy/jsoup", "jsoup-1.17.1", "master")
+    spec.write_text("compare: https://github.com/jhy/jsoup/compare/a...b\nrepo: x\ngood: a\nbad: b\n")
+    with pytest.raises(SpecError, match="either 'compare'"):
+        load_spec(spec)
+    spec.write_text("compare: https://github.com/jhy/jsoup/pull/5\n")
+    with pytest.raises(SpecError, match="compare link"):
+        load_spec(spec)
