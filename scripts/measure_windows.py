@@ -60,7 +60,8 @@ def main() -> int:
         for l in probe_path.read_text(encoding="utf-8").splitlines():
             if l.strip():
                 r = json.loads(l)
-                probes[r["case_id"]] = r
+                if "process_s" in r or r["case_id"] not in probes:
+                    probes[r["case_id"]] = r          # a later success replaces an earlier failure
     if not args.probe and probes:
         cases.sort(key=lambda c: probes.get(c.case_id, {}).get("process_s") or 1e9)   # cheapest first
         if args.max_process is not None:
@@ -70,8 +71,8 @@ def main() -> int:
     print(f"{len(cases)} clean cases selected", flush=True)
 
     for i, case in enumerate(cases, 1):
-        if args.probe and case.case_id in probes:
-            continue
+        if args.probe and "process_s" in probes.get(case.case_id, {}):
+            continue                                  # failed probes are retried
         dest = out / (safe_name(case.case_id) + ".json")
         rec = json.loads(dest.read_text(encoding="utf-8")) if dest.exists() and not args.probe else None
         if rec and rec.get("complete"):

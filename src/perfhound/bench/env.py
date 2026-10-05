@@ -42,9 +42,30 @@ class EnvError(RuntimeError):
     pass
 
 
+# CPython patch releases (minor, version, release date). The PATCH matters too: later 3.11 / 3.12 patch
+# releases changed inspect.signature for descriptors, which breaks 2023-era dask+pandas on import
+# (seen on Windows 2026-10-05: "descriptor '__call__' for 'type' objects doesn't apply to a 'property'
+# object"). So, like packages, Python is pinned to the newest patch that existed on the commit date.
+_PATCHES = {
+    "3.8": [("3.8.1", "2019-12-18"), ("3.8.2", "2020-02-24"), ("3.8.3", "2020-05-13"), ("3.8.5", "2020-07-20"),
+            ("3.8.6", "2020-09-23"), ("3.8.7", "2020-12-21"), ("3.8.8", "2021-02-19"), ("3.8.10", "2021-05-03")],
+    "3.9": [("3.9.6", "2021-06-28"), ("3.9.7", "2021-08-30"), ("3.9.9", "2021-11-15"), ("3.9.10", "2022-01-14"),
+            ("3.9.12", "2022-03-23"), ("3.9.13", "2022-05-17")],
+    "3.10": [("3.10.5", "2022-06-06"), ("3.10.6", "2022-08-02"), ("3.10.7", "2022-09-06"), ("3.10.8", "2022-10-11"),
+             ("3.10.9", "2022-12-06"), ("3.10.10", "2023-02-08"), ("3.10.11", "2023-04-05")],
+    "3.11": [("3.11.4", "2023-06-06"), ("3.11.5", "2023-08-24"), ("3.11.6", "2023-10-02"), ("3.11.7", "2023-12-04"),
+             ("3.11.8", "2024-02-06"), ("3.11.9", "2024-04-02")],
+    "3.12": [("3.12.4", "2024-06-06"), ("3.12.5", "2024-08-06"), ("3.12.6", "2024-09-06"), ("3.12.7", "2024-10-01"),
+             ("3.12.8", "2024-12-03")],
+}
+
+
 def python_for_date(when: datetime) -> str:
+    """Python minor with broad wheel support at that date, pinned to the patch release current then."""
     day = when.date().isoformat()
-    return next(py for limit, py in _PY_BY_DATE if day < limit)
+    minor = next(py for limit, py in _PY_BY_DATE if day < limit)
+    released = [v for v, d in _PATCHES.get(minor, []) if d <= day]
+    return released[-1] if released else minor
 
 
 def project_name(case: RegressionCase) -> str:
@@ -137,9 +158,11 @@ class EnvManager:
             return _venv_python(d)
         uv = _uv()
         t0 = time.perf_counter()
-        minor = int(spec.python.split(".")[1])
+        parts = spec.python.split(".")
+        minor = int(parts[1])
+        candidates = [spec.python] + ([f"3.{minor}"] if len(parts) > 2 else []) + [f"3.{minor + 1}"]
         errors = []
-        for py in (spec.python, f"3.{minor + 1}"):           # e.g. no 3.7 build for this platform -> 3.8
+        for py in candidates:              # exact patch -> same minor -> next minor (logged when used)
             if d.exists():
                 shutil.rmtree(d, ignore_errors=True)
             self._log(f"creating env {d.name}: python {py}, {len(spec.requirements)} requirements as of {spec.exclude_newer}")

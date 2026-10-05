@@ -102,9 +102,11 @@ def test_case_without_workload_is_rejected(slow_fast_repo):
 
 
 def test_env_inference():
-    assert python_for_date(datetime(2016, 5, 1, tzinfo=timezone.utc)) == "3.8"
-    assert python_for_date(datetime(2022, 8, 1, tzinfo=timezone.utc)) == "3.10"
-    assert python_for_date(datetime(2026, 1, 1, tzinfo=timezone.utc)) == "3.12"
+    assert python_for_date(datetime(2016, 5, 1, tzinfo=timezone.utc)) == "3.8"          # before any 3.8 patch
+    assert python_for_date(datetime(2019, 12, 20, tzinfo=timezone.utc)) == "3.8.1"
+    assert python_for_date(datetime(2022, 8, 1, tzinfo=timezone.utc)) == "3.10.5"
+    assert python_for_date(datetime(2023, 8, 15, tzinfo=timezone.utc)) == "3.11.4"      # dask-10428
+    assert python_for_date(datetime(2026, 1, 1, tzinfo=timezone.utc)) == "3.12.8"
     mods = workload_imports(WORKLOAD + "\nimport numpy as np\nimport tlz\nfrom dask.array import ones\n")
     assert mods == ["timeit", "statistics", "slowpkg", "numpy", "tlz", "dask"]      # no "a" from the docstring
     assert third_party(mods, project="dask") == ["slowpkg", "numpy", "toolz"]
