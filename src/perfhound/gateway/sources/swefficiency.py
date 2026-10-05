@@ -51,6 +51,9 @@ PURE_PYTHON_REPOS = ("sympy/sympy", "dask/dask", "pydata/xarray")
 # revert    - extra commit 'Revert "<PR title>"': deliberately easy, for ablations.
 MESSAGE_STRATEGIES = ("piggyback", "neutral", "revert")
 TEST_PATH = re.compile(r"(^|/)(tests?|testing|benchmarks?|asv_bench)(/|$)|(^|/)test_[^/]*\.py$|_test\.py$")
+# The SWE-fficiency instance id ("dask__dask-10356") contains the culprit PR's number,
+# and merge/squash messages contain "#10356" - so it must never be visible to the localizer.
+NEUTRAL_BENCHMARK_NAME = "workload"
 BRANCH_PREFIX = "perfhound/"
 
 
@@ -285,11 +288,12 @@ def build_injected_case(
         case_id=f"swefficiency:{instance_id}", source="swefficiency", repo=str(repo), language="python",
         good=opt, bad=candidates[-1], culprit=culprit, ground_truth="injected",
         regression_type="revert_expert_optimization", expected_magnitude=magnitude,
-        benchmark=BenchmarkSpec(name=task.instance_id, framework="script", workload=task.workload),
+        benchmark=BenchmarkSpec(name=NEUTRAL_BENCHMARK_NAME, framework="script", workload=task.workload),
         metadata={
-            "task": task.instance_id, "upstream_repo": task.repo, "pr_number": task.pr_number,
+            "truth_task": task.instance_id, "upstream_repo": task.repo, "truth_pr_number": task.pr_number,
             "workload_origin": task.workload_origin, "message_strategy": message_strategy,
-            "n_after": n_after, "branch": BRANCH_PREFIX + instance_id, "expert_speedup": task.expert_speedup,
+            "truth_n_after": n_after, "truth_branch": BRANCH_PREFIX + instance_id,
+            "truth_expert_speedup": task.expert_speedup,
             "truth_position": candidates.index(culprit) + 1, "truth_upstream_of": upstream_of,
         },
     )
@@ -357,7 +361,7 @@ class SwefficiencyAdapter:
                 case = None
                 if stored.exists():
                     case = RegressionCase.from_json(stored.read_text(encoding="utf-8"))
-                    tip = run_git(repo, "rev-parse", "--verify", "--quiet", case.metadata.get("branch", ""), check=False)
+                    tip = run_git(repo, "rev-parse", "--verify", "--quiet", case.metadata.get("truth_branch", ""), check=False)
                     if tip.stdout.strip() != case.bad or case.metadata.get("message_strategy") != self.message_strategy:
                         case = None   # branch moved / different settings: rebuild
                 if case is None:
@@ -398,13 +402,13 @@ class AprclInstancesAdapter:
                 language="python", good=d["good_commit"], bad=d["bad_commit"], culprit=d["culprit_commit"],
                 ground_truth="injected", regression_type=d.get("regression_type", "revert_expert_optimization"),
                 expected_magnitude=(speed - 1.0) if speed else None,
-                benchmark=BenchmarkSpec(name=d["source_instance"], framework="script",
+                benchmark=BenchmarkSpec(name=NEUTRAL_BENCHMARK_NAME, framework="script",
                                         workload=wl.read_text(encoding="utf-8") if wl and wl.exists() else None,
                                         command=str(wl) if wl else None),
                 metadata={
-                    "task": d["source_instance"], "upstream_repo": d["repo"], "branch": d.get("branch"),
+                    "truth_task": d["source_instance"], "upstream_repo": d["repo"], "truth_branch": d.get("branch"),
                     "message_strategy": d.get("message_strategy"), "workload_origin": d.get("workload_origin"),
-                    "expert_speedup": speed, "truth_position": d.get("culprit_position"),
+                    "truth_expert_speedup": speed, "truth_position": d.get("culprit_position"),
                     "truth_upstream_of": d.get("upstream_of", {}),
                 },
             )
@@ -451,10 +455,10 @@ def build_real_change_case(
         good=good, bad=candidates[-1], culprit=opt, ground_truth="reported",
         regression_type="expert_optimization", direction="faster",
         expected_magnitude=(1.0 - 1.0 / speedup) if speedup else None,   # 1.84x faster -> time -45.7 %
-        benchmark=BenchmarkSpec(name=task.instance_id, framework="script", workload=task.workload),
+        benchmark=BenchmarkSpec(name=NEUTRAL_BENCHMARK_NAME, framework="script", workload=task.workload),
         metadata={
-            "task": task.instance_id, "upstream_repo": task.repo, "pr_number": task.pr_number, "n": n,
-            "workload_origin": task.workload_origin, "expert_speedup": speedup, "truth_position": position_k,
+            "truth_task": task.instance_id, "upstream_repo": task.repo, "truth_pr_number": task.pr_number, "n": n,
+            "workload_origin": task.workload_origin, "truth_expert_speedup": speedup, "truth_position": position_k,
         },
     )
 

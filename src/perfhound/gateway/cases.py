@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -117,7 +118,9 @@ class RegressionCase:
     def for_localizer(self) -> "RegressionCase":
         """Copy without anything that reveals the answer."""
         meta = {k: v for k, v in self.metadata.items() if not k.startswith("truth_")}
-        return replace(self, culprit=None, ground_truth="none", regression_type=None,
+        # case ids are built from dataset ids / positions ("...dask-10356__real_n20_k13"): opaque id instead
+        opaque = "case-" + hashlib.sha1(self.case_id.encode("utf-8")).hexdigest()[:12]
+        return replace(self, case_id=opaque, culprit=None, ground_truth="none", regression_type=None,
                        expected_magnitude=None, metadata=meta)
 
     # ---- serialization ------------------------------------------------------

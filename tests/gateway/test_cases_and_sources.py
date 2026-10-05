@@ -33,6 +33,7 @@ def test_for_localizer_hides_the_answer():
     assert c.regression_type is None and c.expected_magnitude is None
     assert "truth_position" not in c.metadata and c.metadata["task"] == "sympy__sympy-25591"
     assert "c" * 40 not in c.to_json()
+    assert c.case_id.startswith("case-") and c.case_id != make_case().case_id
     assert (c.good, c.bad, c.benchmark) == (make_case().good, make_case().bad, make_case().benchmark)
 
 
