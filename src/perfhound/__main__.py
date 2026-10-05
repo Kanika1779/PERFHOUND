@@ -4,6 +4,7 @@
     perfhound cases yaml -o path=perfhound.yaml         list the cases a source produces
     perfhound candidates perfhound.yaml                 gateway output for every case in a spec
     perfhound localize perfhound.yaml                   find the culprit (the whole pipeline, live)
+    perfhound github login | whoami | logout            GitHub token (optional: adds PR titles/descriptions)
     perfhound --version
 """
 
@@ -59,6 +60,53 @@ def cmd_cases(args) -> int:
     return 0
 
 
+def _github_provider(fields: str = "title+body"):
+    """GitHub PR provider with the saved/env token (works without a token too: 60 requests/hour)."""
+    from perfhound.gateway.cache import Cache
+    from perfhound.gateway.github import GitHubClient, GitHubPRProvider, find_token
+
+    token, _ = find_token()
+    return GitHubPRProvider(GitHubClient(token), Cache(), fields=fields)
+
+
+def cmd_github(args) -> int:
+    from perfhound.gateway.github import GitHubClient, GitHubError, delete_token, find_token, mask, save_token
+
+    if args.action == "login":
+        import getpass
+
+        token = (args.token or getpass.getpass("GitHub token (input hidden): ")).strip()
+        if not token:
+            raise SystemExit("no token given")
+        client = GitHubClient(token)
+        user = client.get_json("/user")                      # check BEFORE saving
+        path = save_token(token)
+        print(f"logged in as {user.get('login')} - token {mask(token)} saved to {path}")
+        print(f"requests left this hour: {client.rate_remaining}/{client.rate_limit}")
+        return 0
+    if args.action == "logout":
+        print("token removed" if delete_token() else "no saved token")
+        token, source = find_token()
+        if token:
+            print(f"note: a token is still set by {source}")
+        return 0
+    token, source = find_token()
+    client = GitHubClient(token)
+    if not token:
+        rate = client.get_json("/rate_limit").get("rate", {})
+        print(f"no token (anonymous: {rate.get('remaining')}/{rate.get('limit')} requests left this hour) - "
+              f"`perfhound github login` raises the limit to 5,000")
+        return 0
+    try:
+        user = client.get_json("/user")
+    except GitHubError as e:
+        print(f"token {mask(token)} from {source}: {e}")
+        return 1
+    print(f"{user.get('login')}  (token {mask(token)} from {source})")
+    print(f"requests left this hour: {client.rate_remaining}/{client.rate_limit}")
+    return 0
+
+
 def cmd_candidates(args) -> int:
     from perfhound.gateway import Gateway
     from perfhound.gateway.sources.yaml_spec import load_spec
@@ -68,19 +116,24 @@ def cmd_candidates(args) -> int:
         cases = [c for c in cases if c.case_id.endswith(":" + args.case)]
         if not cases:
             raise SystemExit(f"no case named {args.case!r} in {args.spec}")
+    github = _github_provider(args.github_fields) if args.github else None
     for case in cases:
-        with Gateway.for_case(case) as gw:
+        with Gateway.for_case(case, github=github) as gw:
             cands = gw.candidates_for(case.for_localizer(), analyze=not args.no_analyze)
+            for w in gw.last_stats.github_warnings:
+                print(f"warning: {w}", file=sys.stderr)
             if args.json:
                 for c in cands:
                     print(c.to_json())
                 continue
-            print(f"== {case.case_id}: {len(cands)} candidates ({gw.last_stats.seconds:.1f} s, "
-                  f"{gw.last_stats.commit_cache_hits} from cache)")
+            st = gw.last_stats
+            gh = f", GitHub: {st.github_with_pr} with PR, {st.github_requests} requests" if args.github else ""
+            print(f"== {case.case_id}: {len(cands)} candidates ({st.seconds:.1f} s, {st.commit_cache_hits} from cache{gh})")
             for c in cands:
                 fns = list(c.changed_functions) + [f"+{f}" for f in c.added_functions] + [f"-{f}" for f in c.deleted_functions]
                 more = f" (+{len(fns) - 3} more)" if len(fns) > 3 else ""
-                print(f"{c.position:>4}  {c.short_sha}  {c.subject[:50]:<50}  {', '.join(fns[:3])}{more}")
+                pr = f"#{c.pr.number:<6}" if c.pr else " " * 7
+                print(f"{c.position:>4}  {c.short_sha}  {pr} {c.subject[:50]:<50}  {', '.join(fns[:3])}{more}")
     return 0
 
 
@@ -96,7 +149,8 @@ def cmd_localize(args) -> int:
     for case in cases:
         print(f"== {case.case_id}")
         report = localize_case(case, retriever=args.retriever, llm="none" if args.no_llm else "auto", model=args.model,
-                               dry_run=args.dry_run, runner_options={"inner_repeat": args.repeat})
+                               dry_run=args.dry_run, runner_options={"inner_repeat": args.repeat},
+                               github=_github_provider(args.github_fields) if args.github else None)
         if args.report:
             write_report(report, args.report if len(cases) == 1 else f"{args.report}.{case.case_id.split(':')[-1]}.json")
         if case.culprit and report.get("culprit"):          # evaluation spec with a known answer
@@ -126,6 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--case", help="only the case with this name")
     s.add_argument("--json", action="store_true")
     s.add_argument("--no-analyze", action="store_true", help="skip function-level analysis")
+    s.add_argument("--github", action="store_true", help="attach the PR behind each commit (GitHub repos)")
+    s.add_argument("--github-fields", choices=["title", "title+body"], default="title+body")
     s.set_defaults(func=cmd_candidates)
 
     s = sub.add_parser("localize", help="find the commit that changed performance (whole pipeline, live)")
@@ -137,7 +193,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--model", help="Gemini model (default: perfhound.llm.client.DEFAULT_MODEL)")
     s.add_argument("--repeat", type=int, default=5, help="repetitions inside one process (script workloads)")
     s.add_argument("--report", help="write a JSON report here")
+    s.add_argument("--github", action="store_true", help="add PR titles/descriptions to what RAG + LLM read")
+    s.add_argument("--github-fields", choices=["title", "title+body"], default="title+body",
+                   help="'title' is safer for evaluations (descriptions can be edited after the merge)")
     s.set_defaults(func=cmd_localize)
+
+    s = sub.add_parser("github", help="GitHub token: login / whoami / logout")
+    s.add_argument("action", choices=["login", "whoami", "logout"])
+    s.add_argument("--token", help="token for login (default: asked for, hidden)")
+    s.set_defaults(func=cmd_github)
     return p
 
 

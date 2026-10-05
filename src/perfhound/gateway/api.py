@@ -39,6 +39,9 @@ class RequestStats:
     commit_cache_hits: int
     function_cache_hits: int
     seconds: float
+    github_requests: int = 0          # 0 when GitHub is off
+    github_with_pr: int = 0
+    github_warnings: tuple[str, ...] = ()
 
 
 def repo_identity(repo: Path) -> str:
@@ -61,8 +64,14 @@ class Gateway:
         cache: Cache | str | Path | bool = True,
         max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
         max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
+        github=None,
+        github_repo=None,
     ) -> None:
+        """github: a GitHubPRProvider (optional) - attaches PR title/description to each commit.
+        github_repo: RepoRef; default = parsed from the `origin` remote."""
         self.repo = find_repo_root(repo)
+        self.github = github
+        self._github_repo = github_repo
         self.max_diff_lines = max_diff_lines
         self.max_diff_chars = max_diff_chars
         self._local = LocalGitProvider(self.repo, max_diff_lines=max_diff_lines, max_diff_chars=max_diff_chars)
@@ -92,6 +101,12 @@ class Gateway:
         missing = fetcher.ensure_commits(path, [case.good, case.bad])
         if missing:
             raise GatewayError(f"case {case.case_id}: commits not found in {case.repo}: {missing}")
+        if options.get("github") is not None and options.get("github_repo") is None:
+            from .github.links import is_github, parse_repo
+
+            upstream = case.metadata.get("upstream_repo") or case.repo
+            if is_github(upstream):
+                options["github_repo"] = parse_repo(upstream)
         return cls(path, **options)
 
     def candidates_for(self, case: RegressionCase, **options) -> list[CandidateCommit]:
@@ -116,8 +131,32 @@ class Gateway:
         function_hits = 0
         if analyze:
             commits, function_hits = self._add_functions(commits)
-        self.last_stats = RequestStats(len(commits), commit_hits, function_hits, time.perf_counter() - start)
+        gh_requests, gh_with_pr, gh_warnings = 0, 0, ()
+        if self.github is not None and commits:
+            commits, gh = self._add_github(commits)
+            gh_requests, gh_with_pr, gh_warnings = gh.requests, gh.with_pr, tuple(gh.warnings)
+        self.last_stats = RequestStats(len(commits), commit_hits, function_hits, time.perf_counter() - start,
+                                       gh_requests, gh_with_pr, gh_warnings)
         return commits
+
+    def github_repo(self):
+        """RepoRef of this repository on GitHub (given, or from the `origin` remote), else None."""
+        if self._github_repo is None:
+            from .github.links import is_github, parse_repo
+
+            proc = run_git(self.repo, "remote", "get-url", "origin", check=False)
+            url = proc.stdout.strip() if proc.returncode == 0 else ""
+            self._github_repo = parse_repo(url) if url and is_github(url) else False
+        return self._github_repo or None
+
+    def _add_github(self, commits: list[CandidateCommit]):
+        from .github.provider import GitHubStats
+
+        repo = self.github_repo()
+        if repo is None:
+            return commits, GitHubStats(warnings=["not a GitHub repository (origin remote) - PR data skipped"])
+        cutoff = max(c.timestamp for c in commits)          # bad = newest commit of the range: TIME RULE
+        return self.github.enrich(repo, self.repo_id, commits, cutoff=cutoff)
 
     def snapshot(self, path: str | Path, good: str, bad: str, *, sanitizer=None, **range_options) -> Snapshot:
         """Freeze good..bad into a verified JSON file for reproducible experiments."""

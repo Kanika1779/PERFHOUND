@@ -62,13 +62,18 @@ def _llm(choice: str, model: str | None, log):
 
 def localize_case(case: RegressionCase, *, retriever: str = "auto", llm: str = "auto", model: str | None = None,
                   top_k: int = 10, w: float = 0.7, eps: float = 0.05, dry_run: bool = False, python: str | None = None,
-                  runner_options: dict | None = None, log=print) -> dict:
+                  runner_options: dict | None = None, log=print, github=None) -> dict:
     t_start = time.perf_counter()
     hidden = case.for_localizer()
     fetcher = RepoFetcher()
     repo = fetcher.fetch(case.repo)
-    with Gateway.for_case(hidden, fetcher=fetcher) as gw:
+    with Gateway.for_case(hidden, fetcher=fetcher, github=github) as gw:
         cands = sorted(gw.candidates_for(hidden), key=lambda c: c.position)
+        if github is not None:
+            st = gw.last_stats
+            log(f"GitHub: PR found for {st.github_with_pr}/{len(cands)} commits ({st.github_requests} requests)")
+            for w in st.github_warnings:
+                log(f"  warning: {w}")
     if not cands:
         raise ValueError("no commits between good and bad")
     good = run_git(repo, "rev-parse", "--verify", case.good + "^{commit}").stdout.strip()
