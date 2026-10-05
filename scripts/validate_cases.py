@@ -86,7 +86,9 @@ def main() -> int:
             date = datetime.fromisoformat(run_git(repo, "show", "-s", "--format=%cI", case.bad).stdout.strip())
             spec = infer_env(case, date)
             rec["env"] = {"python": spec.python, "requirements": list(spec.requirements), "as_of": spec.exclude_newer}
+            t_env = time.perf_counter()
             python = envs.python_for(spec)
+            rec["seconds_env"] = round(time.perf_counter() - t_env, 1)
             parent = run_git(repo, "rev-parse", case.culprit + "^1").stdout.strip()
             with BenchmarkRunner(case, repo, python, inner_repeat=args.repeat, timeout=args.timeout,
                                  log=lambda m: print(m, flush=True)) as runner:
@@ -99,6 +101,9 @@ def main() -> int:
                     s = runner.measure_interleaved(case.good, case.bad, args.rounds)
                     rec["window_pair"] = pair_stats(s, case.good, case.bad, case.direction, args.min_effect)
                 rec["processes"] = runner.runs
+                rec["seconds_split"] = {k: round(v, 1) for k, v in runner.seconds.items()}
+                print(f"  time: env {rec['seconds_env']:.0f} s, " + ", ".join(f"{k} {v:.0f} s" for k, v in runner.seconds.items()),
+                      flush=True)
             ok = rec["culprit_pair"]["matches"] and (args.no_endpoints or rec["window_pair"]["matches"])
             rec["status"] = "measurable" if ok else "not_measurable"
         except EnvError as e:

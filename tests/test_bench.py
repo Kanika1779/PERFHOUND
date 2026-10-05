@@ -102,7 +102,7 @@ def test_case_without_workload_is_rejected(slow_fast_repo):
 
 
 def test_env_inference():
-    assert python_for_date(datetime(2016, 5, 1, tzinfo=timezone.utc)) == "3.7"
+    assert python_for_date(datetime(2016, 5, 1, tzinfo=timezone.utc)) == "3.8"
     assert python_for_date(datetime(2022, 8, 1, tzinfo=timezone.utc)) == "3.10"
     assert python_for_date(datetime(2026, 1, 1, tzinfo=timezone.utc)) == "3.12"
     mods = workload_imports(WORKLOAD + "\nimport numpy as np\nimport tlz\nfrom dask.array import ones\n")
@@ -113,7 +113,7 @@ def test_env_inference():
                           benchmark=BenchmarkSpec(name="workload", framework="script",
                                                   workload="import dask.bag as db\nimport numpy as np\nimport timeit\n"))
     spec = infer_env(case, datetime(2019, 10, 2, 12, 30, tzinfo=timezone.utc))
-    assert spec.python == "3.7" and spec.requirements == ("dask[array,dataframe]", "numpy")
+    assert spec.python == "3.8" and spec.requirements == ("dask[array,dataframe]", "numpy")
     assert spec.exclude_newer == "2019-10-02T12:30:00Z"
 
 

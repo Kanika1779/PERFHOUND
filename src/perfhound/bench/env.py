@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +30,8 @@ from pathlib import Path
 from ..gateway.cases import RegressionCase
 
 # Python versions with broad Windows/Linux wheel support at a given time (numpy, pandas).
-_PY_BY_DATE = [("2020-07-01", "3.7"), ("2021-07-01", "3.8"), ("2022-07-01", "3.9"),
+# 3.8 is the floor: uv no longer ships 3.7 builds (seen on Windows, 2026-10).
+_PY_BY_DATE = [("2021-07-01", "3.8"), ("2022-07-01", "3.9"),
                ("2023-07-01", "3.10"), ("2024-07-01", "3.11"), ("9999-12-31", "3.12")]
 IMPORT_TO_DIST = {"tlz": "toolz", "yaml": "pyyaml", "sklearn": "scikit-learn", "PIL": "pillow",
                   "cv2": "opencv-python", "bs4": "beautifulsoup4", "dateutil": "python-dateutil"}
@@ -134,6 +136,7 @@ class EnvManager:
         if ready.exists():
             return _venv_python(d)
         uv = _uv()
+        t0 = time.perf_counter()
         minor = int(spec.python.split(".")[1])
         errors = []
         for py in (spec.python, f"3.{minor + 1}"):           # e.g. no 3.7 build for this platform -> 3.8
@@ -154,6 +157,7 @@ class EnvManager:
                 self._log(f"install on python {py} failed: {_last_line(p.stderr)}")
                 continue
             ready.write_text(json.dumps({**asdict(spec), "python_used": py}, indent=2), encoding="utf-8")
+            self._log(f"env ready in {time.perf_counter() - t0:.0f} s")
             return _venv_python(d)
         shutil.rmtree(d, ignore_errors=True)
         raise EnvError("could not build benchmark environment:\n" + "\n---\n".join(errors))

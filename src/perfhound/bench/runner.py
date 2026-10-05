@@ -75,6 +75,7 @@ class BenchmarkRunner:
         self._trees: OrderedDict[str, WorktreeManager] = OrderedDict()
         self._warm: set[str] = set()
         self.runs = 0
+        self.seconds = {"checkout": 0.0, "warmup": 0.0, "samples": 0.0}
 
     # -- worktrees --------------------------------------------------------------------------
     def _tree(self, commit: str) -> Path:
@@ -84,8 +85,12 @@ class BenchmarkRunner:
         if len(self._trees) >= self.max_worktrees:
             _, old = self._trees.popitem(last=False)
             old.close()
+        t0 = time.perf_counter()
         wt = WorktreeManager(self.repo, base_dir=self.worktree_dir)
         path = wt.checkout(commit)
+        dt = time.perf_counter() - t0
+        self.seconds["checkout"] += dt
+        self.log(f"    checkout {commit[:10]}: {dt:.1f} s")
         self._trees[commit] = wt
         return path
 
@@ -104,10 +109,15 @@ class BenchmarkRunner:
         tree = self._tree(commit)
         root, module = self._import_root(tree)
         if commit not in self._warm:
+            t0 = time.perf_counter()
             for _ in range(self.warmup):
                 self._spawn(commit, root, module)
+            self.seconds["warmup"] += time.perf_counter() - t0
             self._warm.add(commit)
-        return self._spawn(commit, root, module)
+        t0 = time.perf_counter()
+        sample = self._spawn(commit, root, module)
+        self.seconds["samples"] += time.perf_counter() - t0
+        return sample
 
     def _spawn(self, commit: str, root: Path, module: str | None) -> Sample:
         env = dict(os.environ)
@@ -147,7 +157,7 @@ class BenchmarkRunner:
             for c in (a, b, b, a):
                 s = self.run_once(c)
                 out[c].append(s)
-                self.log(f"    round {r + 1}/{rounds} {c[:10]} {s.value * 1000:9.2f} ms")
+                self.log(f"    round {r + 1}/{rounds} {c[:10]} {s.value * 1000:9.2f} ms   (process {s.wall:.1f} s)")
         return out
 
     def close(self) -> None:
