@@ -98,10 +98,17 @@ def test_forced_decision_when_undecidable():
 def test_calibrate_detects_no_change():
     src = SimSource({"g": GOOD_MS, "b": GOOD_MS}, seed=3)
     cal = calibrate(src, "g", "b")
-    assert not cal.changed and len(cal.good_samples) == 12
+    assert not cal.changed and len(cal.good_samples) == 20
     src = SimSource({"g": GOOD_MS, "b": GOOD_MS * 0.5}, seed=3)
     cal = calibrate(src, "g", "b")
     assert cal.changed and len(cal.good_samples) == 5
+
+
+def test_detects_a_modest_change_despite_spikes():
+    """15 % change, 8 % noise, 10 % spikes: the old effect-size rule (d >= 2) found it 44 % of the time."""
+    hits = sum(calibrate(SimSource({"g": GOOD_MS, "b": GOOD_MS * 0.85}, spike_p=0.1, seed=s), "g", "b").changed
+               for s in range(500))
+    assert hits / 500 >= 0.8
 
 
 def test_false_change_rate_is_low():

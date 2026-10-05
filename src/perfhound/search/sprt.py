@@ -157,19 +157,26 @@ class Calibration:
     changed: bool        # is there a real change between good and bad at all?
 
 
-def calibrate(source, good: str, bad: str, *, n_init: int = 5, max_n: int = 12, min_separation: float = 2.0) -> Calibration:
-    """Sample both ends (interleaved) until they are clearly apart (d >= min_separation) or max_n each.
+def calibrate(source, good: str, bad: str, *, n_init: int = 5, max_n: int = 20, t_crit: float = 3.6,
+              min_effect: float = 0.03) -> Calibration:
+    """Sample both ends (interleaved) until the change is SIGNIFICANT, or give up at max_n each.
 
-    If they never separate, `changed` is False: there is nothing to localize on this machine, and
-    the scheduler must say so instead of returning a culprit.
+    changed  <=>  t = |log ratio| / (noise * sqrt(1/n_g + 1/n_b)) >= t_crit   AND   |ratio - 1| >= min_effect
+    t_crit 3.6 is strict on purpose: the test is looked at after every pair (up to 16 looks).
+    (A first version required separation d >= 2 instead. d is an EFFECT SIZE, not evidence: a real
+    15 % change at 8 % noise has d ~ 2 and was called "no change" half the time, however many samples.)
+    If never significant, `changed` is False: nothing to localize on this machine - say so, don't guess.
     """
     g, b = [], []
     for _ in range(n_init):
         g.append(source.draw(good))
         b.append(source.draw(bad))
-    lv = estimate_levels(g, b)
-    while lv.separation < min_separation and len(g) < max_n:
+    while True:
+        lv = estimate_levels(g, b)
+        raw_sigma = lv.sigma / math.sqrt(1 + 1 / min(len(g), len(b)))
+        t = abs(lv.bad - lv.good) / (raw_sigma * math.sqrt(1 / len(g) + 1 / len(b)))
+        changed = t >= t_crit and abs(lv.ratio - 1) >= min_effect
+        if changed or len(g) >= max_n:
+            return Calibration(lv, tuple(g), tuple(b), changed)
         g.append(source.draw(good))
         b.append(source.draw(bad))
-        lv = estimate_levels(g, b)
-    return Calibration(lv, tuple(g), tuple(b), lv.separation >= min_separation)
