@@ -117,3 +117,11 @@ def test_missing_fastembed_gives_install_hint(monkeypatch):
 
     with pytest.raises(RuntimeError, match=r"pip install -e \"\.\[embed\]\""):
         FastEmbedEmbedder()
+
+
+def test_model_dir_is_persistent_not_temp(monkeypatch, tmp_path):
+    from perfhound.rag.embeddings import default_model_dir
+    monkeypatch.setenv("PERFHOUND_CACHE_DIR", str(tmp_path))
+    assert default_model_dir() == tmp_path / "models"
+    monkeypatch.delenv("PERFHOUND_CACHE_DIR")
+    assert default_model_dir().parts[-2:] == (".perfhound", "models")

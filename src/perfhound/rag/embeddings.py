@@ -5,7 +5,9 @@ Backend: fastembed (ONNX runtime - no PyTorch, small install, works on Windows).
 Models compared in the evaluation:
     BAAI/bge-small-en-v1.5                 general text, 384-d, ~67 MB
     jinaai/jina-embeddings-v2-base-code    trained on code, 768-d, ~640 MB
-The model is downloaded from Hugging Face on first use.
+The model is downloaded from Hugging Face on first use into ~/.perfhound/models
+(or $PERFHOUND_CACHE_DIR/models). fastembed's own default is the OS temp dir, which
+Windows may clean - forcing a 640 MB re-download.
 
 Vectors are cached in SQLite keyed by (model, sha256(text)): a commit's text
 never changes, so a commit is embedded once per model, ever.
@@ -41,13 +43,24 @@ class FastEmbedEmbedder:
             raise RuntimeError('dense retrieval needs fastembed:  pip install -e ".[embed]"') from None
         self.name = model
         self.max_chars = max_chars   # keep inputs inside the model's context window
-        self._model = TextEmbedding(model_name=model, cache_dir=str(cache_dir) if cache_dir else None)
+        model_dir = Path(cache_dir) if cache_dir else default_model_dir()
+        model_dir.mkdir(parents=True, exist_ok=True)
+        self._model = TextEmbedding(model_name=model, cache_dir=str(model_dir))
 
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         return [list(map(float, v)) for v in self._model.passage_embed([t[: self.max_chars] for t in texts])]
 
     def embed_query(self, text: str) -> list[float]:
         return [float(x) for x in next(iter(self._model.query_embed(text[: self.max_chars])))]
+
+
+def _cache_base() -> Path:
+    base = os.environ.get("PERFHOUND_CACHE_DIR")
+    return Path(base) if base else Path.home() / ".perfhound"
+
+
+def default_model_dir() -> Path:
+    return _cache_base() / "models"
 
 
 def default_embedding_db() -> Path:

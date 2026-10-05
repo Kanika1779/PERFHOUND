@@ -2,7 +2,7 @@
 
 `python scripts/eval_retrieval.py data/cases_real_n20_seed0.jsonl --out results/retrieval_v1`
 
-67 SWE-fficiency real-change cases (sympy 38, dask 19, xarray 10), 20 candidates each, culprit = expert
+67 SWE-fficiency real-change cases (xarray-7374 missing from this run; see v2 README) (sympy 38, dask 19, xarray 10), 20 candidates each, culprit = expert
 optimization PR at a random position. Query = the task's workload script. Rank of the culprit among 20.
 
 | method | R@1 | R@3 | R@5 | R@10 | MRR |
