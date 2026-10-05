@@ -141,7 +141,8 @@ def main() -> int:
                 continue
         except (EnvError, BenchmarkError) as e:
             row = {"case_id": case.case_id, "error": str(e)[-1500:]}
-            print(f"  FAILED: {str(e)[:500]}", flush=True)
+            lines = [l for l in str(e).strip().splitlines() if l.strip()]
+            print(f"  FAILED: {lines[0][:200]}\n    ... " + "\n    ".join(l[:200] for l in lines[-3:]), flush=True)
             if not args.probe:
                 (out / (safe_name(case.case_id) + ".error.txt")).write_text(str(e), encoding="utf-8")
                 continue
