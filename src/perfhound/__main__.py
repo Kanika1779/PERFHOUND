@@ -3,6 +3,7 @@
     perfhound sources                                   list input sources
     perfhound cases yaml -o path=perfhound.yaml         list the cases a source produces
     perfhound candidates perfhound.yaml                 gateway output for every case in a spec
+    perfhound localize perfhound.yaml                   find the culprit (the whole pipeline, live)
     perfhound --version
 """
 
@@ -83,6 +84,26 @@ def cmd_candidates(args) -> int:
     return 0
 
 
+def cmd_localize(args) -> int:
+    from perfhound.gateway.sources.yaml_spec import load_spec
+    from perfhound.localize import localize_case, write_report
+
+    cases = load_spec(args.spec)
+    if args.case:
+        cases = [c for c in cases if c.case_id.endswith(":" + args.case)]
+        if not cases:
+            raise SystemExit(f"no case named {args.case!r} in {args.spec}")
+    for case in cases:
+        print(f"== {case.case_id}")
+        report = localize_case(case, retriever=args.retriever, llm="none" if args.no_llm else "auto", model=args.model,
+                               dry_run=args.dry_run, runner_options={"inner_repeat": args.repeat})
+        if args.report:
+            write_report(report, args.report if len(cases) == 1 else f"{args.report}.{case.case_id.split(':')[-1]}.json")
+        if case.culprit and report.get("culprit"):          # evaluation spec with a known answer
+            print("  (known culprit: " + ("MATCH)" if report["culprit"].startswith(case.culprit) or case.culprit.startswith(report["culprit"]) else f"{case.culprit[:10]} - MISS)"))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="perfhound", description="Find the commit that changed your code's speed.")
     p.add_argument("--version", "-V", action="version", version=f"perfhound {__version__}")
@@ -106,6 +127,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s.add_argument("--no-analyze", action="store_true", help="skip function-level analysis")
     s.set_defaults(func=cmd_candidates)
+
+    s = sub.add_parser("localize", help="find the commit that changed performance (whole pipeline, live)")
+    s.add_argument("spec")
+    s.add_argument("--case", help="only the case with this name")
+    s.add_argument("--dry-run", action="store_true", help="show the prior (suspects) without running benchmarks")
+    s.add_argument("--no-llm", action="store_true", help="retrieval prior only")
+    s.add_argument("--retriever", choices=["auto", "hybrid", "bm25"], default="auto")
+    s.add_argument("--model", help="Gemini model (default: perfhound.llm.client.DEFAULT_MODEL)")
+    s.add_argument("--repeat", type=int, default=5, help="repetitions inside one process (script workloads)")
+    s.add_argument("--report", help="write a JSON report here")
+    s.set_defaults(func=cmd_localize)
     return p
 
 

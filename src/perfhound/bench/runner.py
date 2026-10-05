@@ -68,6 +68,32 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     proc.wait()
 
 
+def read_metric(metric: dict, stdout: str, wall: float) -> float:
+    """One sample's number: wall time of the command, a regex capture, or a key of the last JSON line."""
+    import re
+
+    kind = metric.get("type", "wall_time")
+    if kind == "wall_time":
+        return wall
+    if kind == "regex":
+        found = re.findall(metric["pattern"], stdout)
+        if not found:
+            raise BenchmarkError(f"metric pattern {metric['pattern']!r} not found in the output:\n{stdout.strip()[-500:]}")
+        return float(found[-1])
+    if kind == "json":
+        for line in reversed(stdout.strip().splitlines()):
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            for part in str(metric["key"]).split("."):
+                data = data[part] if isinstance(data, dict) and part in data else None
+            if isinstance(data, (int, float)):
+                return float(data)
+        raise BenchmarkError(f"no JSON line with key {metric['key']!r} in the output:\n{stdout.strip()[-500:]}")
+    raise BenchmarkError(f"unknown metric type {kind!r}")
+
+
 class BenchmarkError(RuntimeError):
     pass
 
@@ -86,10 +112,15 @@ class BenchmarkRunner:
                  timeout: float = 900, warmup: int = 1, max_worktrees: int = 4, pin_threads: bool = True,
                  worktree_dir: str | Path | None = None, log=None, max_memory_mb: int | None = -1) -> None:
         b = case.benchmark
-        if b is None or not b.workload:
+        if b is None:
+            raise BenchmarkError(f"case has no benchmark ({case.case_id})")
+        if b.framework == "script" and not b.workload:
             raise BenchmarkError(f"case has no workload to run ({case.case_id})")
-        if b.framework != "script":
-            raise BenchmarkError(f"framework {b.framework!r} not supported yet (only 'script' workloads)")
+        if b.framework == "command" and not b.command:
+            raise BenchmarkError(f"command benchmark without a command ({case.case_id})")
+        if b.framework not in ("script", "command"):
+            raise BenchmarkError(f"framework {b.framework!r} not supported yet ('script' or 'command')")
+        self.framework = b.framework
         self.case = case
         self.repo = Path(repo)
         self.python = str(python)
@@ -103,7 +134,9 @@ class BenchmarkRunner:
         self.max_memory_mb = default_memory_limit_mb() if max_memory_mb == -1 else max_memory_mb
         self._tmp = tempfile.TemporaryDirectory(prefix="perfhound-bench-")
         self.workload_path = Path(self._tmp.name) / "workload.py"
-        self.workload_path.write_text(b.workload, encoding="utf-8")
+        if b.workload:
+            self.workload_path.write_text(b.workload, encoding="utf-8")
+        self._setup_done: set[str] = set()
         self.module = b.params.get("module")      # else: found per worktree by _import_root
         self._trees: OrderedDict[str, WorktreeManager] = OrderedDict()
         self._warm: set[str] = set()
@@ -119,6 +152,7 @@ class BenchmarkRunner:
             evicted, old = self._trees.popitem(last=False)
             old.close()
             self._warm.discard(evicted)      # a fresh checkout has no .pyc files: warm it up again
+            self._setup_done.discard(evicted)
         t0 = time.perf_counter()
         wt = WorktreeManager(self.repo, base_dir=self.worktree_dir)
         path = wt.checkout(commit)
@@ -141,6 +175,8 @@ class BenchmarkRunner:
     # -- running ----------------------------------------------------------------------------
     def run_once(self, commit: str) -> Sample:
         tree = self._tree(commit)
+        if self.framework == "command":
+            return self._run_command_sample(commit, tree)
         root, module = self._import_root(tree)
         if commit not in self._warm:
             t0 = time.perf_counter()
@@ -177,7 +213,8 @@ class BenchmarkRunner:
         per_call = [t / number for t in data["times"]]
         return Sample(commit, statistics.median(per_call), per_call, wall, data.get("python", ""))
 
-    def _run_guarded(self, cmd: list[str], env: dict, commit: str) -> tuple[int, str, str]:
+    def _run_guarded(self, cmd, env: dict, commit: str, *, shell: bool = False, cwd: Path | None = None,
+                     timeout: float | None = None) -> tuple[int, str, str]:
         """Run one sample with a TIME and a MEMORY limit (process tree killed when exceeded).
 
         Why memory: some symbolic workloads (sympy-26057 charpoly of a 10x10 symbol matrix,
@@ -188,13 +225,14 @@ class BenchmarkRunner:
         out_path = Path(self._tmp.name) / "stdout.txt"
         err_path = Path(self._tmp.name) / "stderr.txt"
         with open(out_path, "wb") as fo, open(err_path, "wb") as fe:
-            proc = subprocess.Popen(cmd, cwd=self._tmp.name, env=env, stdout=fo, stderr=fe)
+            proc = subprocess.Popen(cmd, cwd=str(cwd or self._tmp.name), env=env, stdout=fo, stderr=fe, shell=shell)
+            limit = timeout or self.timeout
             start = time.monotonic()
             killed = None
             while proc.poll() is None:
-                time.sleep(0.25)
-                if time.monotonic() - start > self.timeout:
-                    killed = f"timed out after {self.timeout:.0f} s"
+                time.sleep(0.05 if time.monotonic() - start < 2 else 0.25)
+                if time.monotonic() - start > limit:
+                    killed = f"timed out after {limit:.0f} s"
                 elif self.max_memory_mb and _tree_rss_mb(proc.pid) > self.max_memory_mb:
                     killed = f"used more than {self.max_memory_mb} MB of memory (workload blows up at this commit)"
                 if killed:
@@ -202,6 +240,53 @@ class BenchmarkRunner:
                     raise BenchmarkError(f"{commit[:10]}: benchmark {killed}")
         read = lambda p: p.read_text(encoding="utf-8", errors="replace")
         return proc.returncode, read(out_path), read(err_path)
+
+    # -- command benchmarks (perfhound.yaml) ---------------------------------------------------
+    def _command_env(self, tree: Path) -> dict:
+        env = dict(os.environ)
+        env.pop("PYTHONHOME", None)
+        env["PYTHONPATH"] = str(tree / "src") if (tree / "src").is_dir() else str(tree)
+        env["PYTHONHASHSEED"] = "0"
+        env["PYTHONIOENCODING"] = "utf-8"
+        # `python` inside the command = the benchmark interpreter (its folder first on PATH)
+        env["PATH"] = str(Path(self.python).parent) + os.pathsep + env.get("PATH", "")
+        if self.pin_threads:
+            env.update({v: "1" for v in THREAD_VARS})
+        return env
+
+    def _run_command_sample(self, commit: str, tree: Path) -> Sample:
+        b = self.case.benchmark
+        env = self._command_env(tree)
+        if b.setup and commit not in self._setup_done:
+            t0 = time.perf_counter()
+            code, out, err = self._run_guarded(b.setup, env, commit, shell=True, cwd=tree, timeout=max(self.timeout, 3600))
+            if code != 0:
+                raise BenchmarkError(f"{commit[:10]}: setup failed (exit {code}): {b.setup}\n{(err or out).strip()[-1500:]}")
+            self.seconds["warmup"] += time.perf_counter() - t0
+            self._setup_done.add(commit)
+        if commit not in self._warm:
+            t0 = time.perf_counter()
+            for _ in range(self.warmup):
+                self._one_command(commit, tree, env)
+            self.seconds["warmup"] += time.perf_counter() - t0
+            self._warm.add(commit)
+        t0 = time.perf_counter()
+        sample = self._one_command(commit, tree, env)
+        self.seconds["samples"] += time.perf_counter() - t0
+        return sample
+
+    def _one_command(self, commit: str, tree: Path, env: dict) -> Sample:
+        b = self.case.benchmark
+        start = time.perf_counter()
+        code, out, err = self._run_guarded(b.command, env, commit, shell=True, cwd=tree)
+        wall = time.perf_counter() - start
+        self.runs += 1
+        if code != 0:
+            raise BenchmarkError(f"{commit[:10]}: benchmark command failed (exit {code}): {b.command}\n{(err or out).strip()[-1500:]}")
+        value = read_metric(b.metric, out, wall)
+        if not value > 0:
+            raise BenchmarkError(f"{commit[:10]}: metric must be a positive number, got {value}")
+        return Sample(commit, value, [value], wall, "")
 
     def measure(self, commit: str, n: int) -> list[Sample]:
         return [self.run_once(commit) for _ in range(n)]

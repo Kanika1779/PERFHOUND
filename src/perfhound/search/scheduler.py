@@ -95,7 +95,7 @@ def _normalize(p: Sequence[float]) -> list[float]:
 
 def localize(source, commits: Sequence[str], prior: Sequence[float] | None = None, *, tester=None,
              error: float = 0.05, update: str = "soft", confidence: float = 0.95, max_tests: int = 40,
-             calibration: dict | None = None) -> SearchResult:
+             calibration: dict | None = None, on_step=None) -> SearchResult:
     """commits = [good, c1, ..., cn]; prior over c1..cn (None = uniform). Returns the culprit estimate."""
     n = len(commits) - 1
     if n < 1:
@@ -114,6 +114,8 @@ def localize(source, commits: Sequence[str], prior: Sequence[float] | None = Non
     runs0 = source.runs
     cal = calibrate(source, commits[0], commits[-1], **(calibration or {}))
     cal_runs = source.runs - runs0
+    if on_step:
+        on_step(cal, post)
     if not cal.changed:
         return SearchResult(None, None, 0.0, source.runs - runs0, cal_runs, 0, "no_change", post, [])
 
@@ -134,6 +136,8 @@ def localize(source, commits: Sequence[str], prior: Sequence[float] | None = Non
             post = [1.0 / n] * n
         post = _normalize(post)
         steps.append(Step(m, commits[m], v.label, v.samples, v.forced, max(post)))
+        if on_step:
+            on_step(steps[-1], post)
 
     j = max(range(n), key=lambda i: post[i])
     stopped = "confident" if max(post) >= confidence else "budget"
