@@ -49,6 +49,7 @@ def main() -> int:
     ap.add_argument("--min-interval", type=float, default=4.5, help="seconds between API calls (free tier RPM)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--dump-priors", help="write every case's full priors (candidate order) to this JSONL, for Step 7")
     args = ap.parse_args()
 
     cases = [RegressionCase.from_json(l) for l in Path(args.cases).read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -86,6 +87,7 @@ def main() -> int:
     res = {m: [] for m in names}
     bits = {m: [] for m in names}
     rows, failures = [], 0
+    dump = open(args.dump_priors, "w", encoding="utf-8") if args.dump_priors else None
     with open(out / "llm_answers.jsonl", "w", encoding="utf-8") as raw:
         for i, case in enumerate(cases, 1):
             hidden = case.for_localizer()
@@ -112,6 +114,10 @@ def main() -> int:
                 row[f"{m}:rank"] = r
                 row[f"{m}:bits"] = round(b, 3)
             rows.append(row)
+            if dump:
+                order = [d.sha for d in sorted(docs, key=lambda d: d.position)]
+                dump.write(json.dumps({"case_id": case.case_id, "candidates": order, "llm_ok": p.llm_ok,
+                                       **{m: [priors[m].probs[sha] for sha in order] for m in names}}) + "\n")
             raw.write(json.dumps({"case_id": case.case_id, "culprit": case.culprit, "ok": p.llm_ok, "error": p.error,
                                   "scores": p.llm_scores, "reasons": p.reasons}) + "\n")
             print(f"[{i}/{len(cases)}] {case.case_id:<52} retr={row['retrieval:rank']:>2} "
@@ -119,6 +125,8 @@ def main() -> int:
                   f"bits {row['retrieval:bits']:.2f} -> {row['llm+retr:bits']:.2f}" + ("" if p.llm_ok else f"  LLM FAILED: {p.error}"),
                   flush=True)
 
+    if dump:
+        dump.close()
     uniform = statistics.mean(math.log2(r.n) for r in res["retrieval"])
     table = [{"method": "uniform", "recall@1": None, "mrr": None, "mean_bits": uniform}]
     for m in names:

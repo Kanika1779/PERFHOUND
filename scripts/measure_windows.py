@@ -40,6 +40,8 @@ def main() -> int:
     ap.add_argument("cases")
     ap.add_argument("--out", default="results/windows")
     ap.add_argument("--samples", type=int, default=6, help="samples per commit (rounds)")
+    ap.add_argument("--endpoint-samples", type=int, default=20,
+                    help="samples for good and bad (calibration may need up to 20 per side)")
     ap.add_argument("--repeat", type=int, default=5)
     ap.add_argument("--timeout", type=float, default=900)
     ap.add_argument("--case")
@@ -89,7 +91,7 @@ def main() -> int:
                 with BenchmarkRunner(case, repo, python, inner_repeat=args.repeat, timeout=args.timeout, warmup=0) as r:
                     s = r.run_once(case.bad)
                 row = {"case_id": case.case_id, "process_s": round(s.wall, 1), "value_ms": round(s.value * 1000, 3),
-                       "est_hours": round(s.wall * 21 * (args.samples + 1) / 3600, 2)}
+                       "est_hours": round(s.wall * (21 * (args.samples + 1) + 2 * (args.endpoint_samples - args.samples)) / 3600, 2)}
                 print(f"  process {s.wall:.1f} s -> about {row['est_hours']} h for {args.samples} samples x 21 commits", flush=True)
             else:
                 hidden = case.for_localizer()
@@ -116,6 +118,14 @@ def main() -> int:
                         rec["python_used"] = s.python
                         dest.write_text(json.dumps(rec), encoding="utf-8")
                         print(f"  round {rnd}/{args.samples} done ({time.perf_counter() - t_round:.0f} s)", flush=True)
+                    ends = [commits[0], commits[-1]]
+                    while min(len(rec["samples"][c]) for c in ends) < args.endpoint_samples:
+                        for c in ends:                       # interleaved good/bad, as calibration does
+                            s = r.run_once(c)
+                            rec["samples"][c].append(s.value)
+                            rec["wall"][c].append(round(s.wall, 2))
+                        dest.write_text(json.dumps(rec), encoding="utf-8")
+                    print(f"  endpoints: {args.endpoint_samples} samples each", flush=True)
                 rec["complete"] = True
                 dest.write_text(json.dumps(rec), encoding="utf-8")
                 ci = rec["culprit_index"]
