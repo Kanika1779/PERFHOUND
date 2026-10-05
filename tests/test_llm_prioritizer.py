@@ -126,3 +126,8 @@ def test_gemini_needs_key(monkeypatch):
 def test_retry_after_parses_gemini_429():
     assert _retry_after('{"retryDelay": "17s"}') == 18.0
     assert _retry_after("nothing") is None
+
+
+def test_hide_message_ablation():
+    prompt, _ = build_prompt(HIDDEN, [DOCS[1]], hide_message=True)
+    assert "Speed up sum" not in prompt and "Message: (hidden)" in prompt and "pkg.core.sum" in prompt

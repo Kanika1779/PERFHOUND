@@ -9,6 +9,8 @@ Design choices (each one is an experiment knob, not a guess we hide):
 - redact(): PR / issue numbers removed from commit text by default. They carry no
   information about code, but let a model that memorized the project's history
   "recognize" a famous optimization PR. --no-redact is the ablation.
+- hide_message: ablation for datasets whose culprits are deliberate optimizations - their
+  messages advertise it ("Speed up ..."), real regressions never do. Code-only judgement.
 """
 
 from __future__ import annotations
@@ -84,9 +86,9 @@ def describe_symptom(case: RegressionCase) -> str:
     return "\n".join(lines)
 
 
-def describe_commit(alias: str, doc: CommitDocument, *, do_redact: bool) -> str:
+def describe_commit(alias: str, doc: CommitDocument, *, do_redact: bool, hide_message: bool = False) -> str:
     f = doc.fields
-    msg = _clip(f.get("message", ""), MAX_MESSAGE)
+    msg = "(hidden)" if hide_message else _clip(f.get("message", ""), MAX_MESSAGE)
     paths = f.get("paths", "").split()
     funcs = f.get("functions", "").split()
     diff = _clip(f.get("diff", ""), MAX_DIFF)
@@ -102,12 +104,13 @@ def describe_commit(alias: str, doc: CommitDocument, *, do_redact: bool) -> str:
     return "\n".join(out)
 
 
-def build_prompt(case: RegressionCase, docs: Sequence[CommitDocument], *, do_redact: bool = True) -> tuple[str, dict[str, str]]:
+def build_prompt(case: RegressionCase, docs: Sequence[CommitDocument], *, do_redact: bool = True,
+                 hide_message: bool = False) -> tuple[str, dict[str, str]]:
     """Return (prompt, alias -> sha). `case` must be case.for_localizer()."""
     ordered = sorted(docs, key=lambda d: d.position)          # chronological, never retrieval order
     aliases = {f"C{i}": d.sha for i, d in enumerate(ordered, start=1)}
     project = case.repo.rstrip("/").split("/")[-1].removesuffix(".git")
-    commits = "\n\n".join(describe_commit(a, d, do_redact=do_redact) for a, d in zip(aliases, ordered))
+    commits = "\n\n".join(describe_commit(a, d, do_redact=do_redact, hide_message=hide_message) for a, d in zip(aliases, ordered))
     prompt = f"""You are a performance engineer localizing which commit changed the performance of a {case.language} project ({project}).
 
 {describe_symptom(case)}

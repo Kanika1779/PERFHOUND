@@ -45,6 +45,7 @@ def main() -> int:
     ap.add_argument("--w", type=float, default=0.7)
     ap.add_argument("--eps", type=float, default=0.05)
     ap.add_argument("--no-redact", action="store_true", help="ablation: keep PR/issue numbers in commit text")
+    ap.add_argument("--no-message", action="store_true", help="ablation: hide commit messages from the LLM")
     ap.add_argument("--min-interval", type=float, default=4.5, help="seconds between API calls (free tier RPM)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--dry-run", action="store_true")
@@ -73,7 +74,7 @@ def main() -> int:
         docs = build_commit_documents(cands)
         ranking = rank(build_query(hidden), docs)
         short = [d for d in docs if d.sha in {r.sha for r in ranking if r.rank <= args.top_k}]
-        prompt, _ = build_prompt(hidden, short, do_redact=not args.no_redact)
+        prompt, _ = build_prompt(hidden, short, do_redact=not args.no_redact, hide_message=args.no_message)
         print(prompt)
         print(f"\n[{len(prompt)} chars, roughly {len(prompt) // 4} tokens]")
         return 0
@@ -92,7 +93,7 @@ def main() -> int:
             docs = build_commit_documents(cands)
             n = len(docs)
             ranking = rank(build_query(hidden), docs)
-            kw = dict(top_k=args.top_k, eps=args.eps, do_redact=not args.no_redact)
+            kw = dict(top_k=args.top_k, eps=args.eps, do_redact=not args.no_redact, hide_message=args.no_message)
             priors = {
                 "retrieval": prioritize(hidden, docs, ranking, None, w=0.0, **kw),
                 "llm+retr": prioritize(hidden, docs, ranking, llm, w=args.w, **kw),
@@ -127,7 +128,7 @@ def main() -> int:
     losses = sum(a > b + 1e-9 for a, b in zip(bits["llm+retr"], bits["retrieval"]))
     usage = getattr(llm.inner, "usage", {})
     summary = {"cases": len(cases), "model": args.model, "retriever": args.retriever, "top_k": args.top_k,
-               "w": args.w, "eps": args.eps, "redact": not args.no_redact, "llm_failures": failures,
+               "w": args.w, "eps": args.eps, "redact": not args.no_redact, "hide_message": args.no_message, "llm_failures": failures,
                "llm+retr_vs_retrieval_bits": {"better": wins, "worse": losses, "same": len(cases) - wins - losses},
                "cache_hits": llm.hits, "api_calls": usage.get("calls"), "prompt_tokens": usage.get("prompt_tokens"),
                "output_tokens": usage.get("output_tokens"), "table": table}
@@ -138,7 +139,7 @@ def main() -> int:
     (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     print(f"\n{len(cases)} cases | {args.model} | retriever={args.retriever} top-k={args.top_k} w={args.w} "
-          f"| LLM failures: {failures}\n")
+          f"{' | messages HIDDEN' if args.no_message else ''} | LLM failures: {failures}\n")
     print(f"{'method':<12}{'R@1':>7}{'R@3':>7}{'R@5':>7}{'MRR':>7}{'bits':>8}")
     for t in table:
         if t["recall@1"] is None:

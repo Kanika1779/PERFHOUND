@@ -53,7 +53,7 @@ def retrieval_prior(ranking: Sequence[RankedCandidate], *, c: float = 1.0) -> di
 
 def prioritize(case: RegressionCase, docs: Sequence[CommitDocument], ranking: Sequence[RankedCandidate], llm, *,
                top_k: int = 10, w: float = 0.7, eps: float = 0.05, c: float = 1.0,
-               do_redact: bool = True) -> Prior:
+               do_redact: bool = True, hide_message: bool = False) -> Prior:
     """case must be case.for_localizer(); ranking covers every doc (from rag.retriever)."""
     n = len(ranking)
     positions = {r.sha: r.position for r in ranking}
@@ -65,7 +65,7 @@ def prioritize(case: RegressionCase, docs: Sequence[CommitDocument], ranking: Se
     reasons: dict[str, str] = {}
     error = None
     if llm is not None and w > 0 and short:
-        prompt, aliases = build_prompt(case, short, do_redact=do_redact)
+        prompt, aliases = build_prompt(case, short, do_redact=do_redact, hide_message=hide_message)
         try:
             answer = llm.complete_json(prompt, SCHEMA)
             llm_scores, reasons = _parse(answer, aliases)
