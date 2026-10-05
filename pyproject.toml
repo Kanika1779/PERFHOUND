@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 embed = ["fastembed>=0.4"]
+bench = ["uv>=0.4"]
 
 [project.scripts]
 perfhound = "perfhound.__main__:main"
