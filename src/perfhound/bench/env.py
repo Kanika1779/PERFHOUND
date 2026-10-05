@@ -175,6 +175,13 @@ class EnvManager:
             if spec.exclude_newer:
                 cmd += ["--exclude-newer", spec.exclude_newer]
             p = self._run([*cmd, *spec.requirements])
+            if p.returncode != 0 and "exclude-newer" in p.stderr and "setuptools" in p.stderr:
+                # 2016-2019 packages (e.g. mpmath) ship only sdists; building them needs setuptools>=40.8,
+                # which did not exist on that date. Build tools are not the code under test: install a
+                # current setuptools into the env and build without isolation.
+                self._log("old sdist needs newer setuptools: retrying with --no-build-isolation")
+                self._run([*uv, "pip", "install", "--python", str(_venv_python(d)), "setuptools<70", "wheel"])
+                p = self._run([*cmd, "--no-build-isolation", *spec.requirements])
             if p.returncode != 0:
                 errors.append(f"install on python {py}: {p.stderr.strip()[-1500:]}")
                 self._log(f"install on python {py} failed: {_last_line(p.stderr)}")

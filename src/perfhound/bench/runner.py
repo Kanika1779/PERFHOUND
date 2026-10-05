@@ -36,6 +36,38 @@ MARK = "@@PERFHOUND@@"
 THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")
 
 
+def default_memory_limit_mb() -> int | None:
+    """40 % of physical RAM (needs psutil; without it there is no memory guard - only the timeout)."""
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().total * 0.4 / 2**20)
+    except ImportError:
+        return None
+
+
+def _tree_rss_mb(pid: int) -> float:
+    try:
+        import psutil
+
+        p = psutil.Process(pid)
+        return sum(q.memory_info().rss for q in [p, *p.children(recursive=True)]) / 2**20
+    except Exception:
+        return 0.0
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    try:
+        import psutil
+
+        for q in psutil.Process(proc.pid).children(recursive=True):
+            q.kill()
+    except Exception:
+        pass
+    proc.kill()
+    proc.wait()
+
+
 class BenchmarkError(RuntimeError):
     pass
 
@@ -52,7 +84,7 @@ class Sample:
 class BenchmarkRunner:
     def __init__(self, case: RegressionCase, repo: str | Path, python: str | Path, *, inner_repeat: int = 5,
                  timeout: float = 900, warmup: int = 1, max_worktrees: int = 4, pin_threads: bool = True,
-                 worktree_dir: str | Path | None = None, log=None) -> None:
+                 worktree_dir: str | Path | None = None, log=None, max_memory_mb: int | None = -1) -> None:
         b = case.benchmark
         if b is None or not b.workload:
             raise BenchmarkError(f"case has no workload to run ({case.case_id})")
@@ -68,6 +100,7 @@ class BenchmarkRunner:
         self.pin_threads = pin_threads
         self.worktree_dir = worktree_dir
         self.log = log or (lambda msg: None)
+        self.max_memory_mb = default_memory_limit_mb() if max_memory_mb == -1 else max_memory_mb
         self._tmp = tempfile.TemporaryDirectory(prefix="perfhound-bench-")
         self.workload_path = Path(self._tmp.name) / "workload.py"
         self.workload_path.write_text(b.workload, encoding="utf-8")
@@ -133,20 +166,42 @@ class BenchmarkRunner:
         if module:
             cmd += ["--expect-module", module, "--expect-root", str(root)]
         start = time.perf_counter()
-        try:
-            p = subprocess.run(cmd, cwd=self._tmp.name, env=env, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=self.timeout)
-        except subprocess.TimeoutExpired:
-            raise BenchmarkError(f"{commit[:10]}: benchmark timed out after {self.timeout:.0f} s") from None
+        returncode, stdout, stderr = self._run_guarded(cmd, env, commit)
         wall = time.perf_counter() - start
         self.runs += 1
-        line = next((l for l in p.stdout.splitlines() if l.startswith(MARK)), None)
-        if p.returncode != 0 or line is None:
-            raise BenchmarkError(f"{commit[:10]}: benchmark failed (exit {p.returncode}):\n{p.stderr.strip()[-1500:]}")
+        line = next((l for l in stdout.splitlines() if l.startswith(MARK)), None)
+        if returncode != 0 or line is None:
+            raise BenchmarkError(f"{commit[:10]}: benchmark failed (exit {returncode}):\n{stderr.strip()[-1500:]}")
         data = json.loads(line[len(MARK):])
         number = data["number"] or 1
         per_call = [t / number for t in data["times"]]
         return Sample(commit, statistics.median(per_call), per_call, wall, data.get("python", ""))
+
+    def _run_guarded(self, cmd: list[str], env: dict, commit: str) -> tuple[int, str, str]:
+        """Run one sample with a TIME and a MEMORY limit (process tree killed when exceeded).
+
+        Why memory: some symbolic workloads (sympy-26057 charpoly of a 10x10 symbol matrix,
+        sympy-26063 gauss_jordan_solve) blow up exponentially at some commits; on a laptop the
+        machine starts swapping and freezes (VS Code included) long before a timeout fires.
+        Output goes to files, not pipes, so a chatty workload can never deadlock us.
+        """
+        out_path = Path(self._tmp.name) / "stdout.txt"
+        err_path = Path(self._tmp.name) / "stderr.txt"
+        with open(out_path, "wb") as fo, open(err_path, "wb") as fe:
+            proc = subprocess.Popen(cmd, cwd=self._tmp.name, env=env, stdout=fo, stderr=fe)
+            start = time.monotonic()
+            killed = None
+            while proc.poll() is None:
+                time.sleep(0.25)
+                if time.monotonic() - start > self.timeout:
+                    killed = f"timed out after {self.timeout:.0f} s"
+                elif self.max_memory_mb and _tree_rss_mb(proc.pid) > self.max_memory_mb:
+                    killed = f"used more than {self.max_memory_mb} MB of memory (workload blows up at this commit)"
+                if killed:
+                    _kill_tree(proc)
+                    raise BenchmarkError(f"{commit[:10]}: benchmark {killed}")
+        read = lambda p: p.read_text(encoding="utf-8", errors="replace")
+        return proc.returncode, read(out_path), read(err_path)
 
     def measure(self, commit: str, n: int) -> list[Sample]:
         return [self.run_once(commit) for _ in range(n)]

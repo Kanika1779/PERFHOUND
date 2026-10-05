@@ -150,3 +150,44 @@ def test_workload_audit():
     status, why = audit_workload(copied)
     assert status == "inlines_code" and "copied" in why and any("_primepi" in w for w in why)
     assert audit_workload("# a copy of the data\n" + WORKLOAD)[0] == "mentions_copy"
+
+
+HOG = '''
+import timeit
+from slowpkg.core import work
+def setup():
+    global blob
+    blob = [bytearray(10**6) for _ in range(2000)]     # ~2 GB: a symbolic blow-up in miniature
+def workload():
+    work()
+timeit.repeat(workload, number=1, repeat=2, setup=setup)
+'''
+SPIN = '''
+import timeit
+from slowpkg.core import work
+def setup():
+    pass
+def workload():
+    while True:
+        pass
+timeit.repeat(workload, number=1, repeat=1, setup=setup)
+'''
+
+
+def test_memory_guard_kills_runaway_workload(slow_fast_repo, tmp_path):
+    pytest.importorskip("psutil")
+    repo, slow, fast = slow_fast_repo
+    case = make_case(repo, slow, fast, workload=HOG)
+    with BenchmarkRunner(case, repo, sys.executable, worktree_dir=tmp_path / "wt", max_memory_mb=300, warmup=0) as r:
+        with pytest.raises(BenchmarkError, match="more than 300 MB"):
+            r.run_once(slow)
+
+
+def test_timeout_kills_hung_workload(slow_fast_repo, tmp_path):
+    repo, slow, fast = slow_fast_repo
+    case = make_case(repo, slow, fast, workload=SPIN)
+    with BenchmarkRunner(case, repo, sys.executable, worktree_dir=tmp_path / "wt", timeout=2, warmup=0) as r:
+        t0 = __import__("time").monotonic()
+        with pytest.raises(BenchmarkError, match="timed out"):
+            r.run_once(slow)
+        assert __import__("time").monotonic() - t0 < 10

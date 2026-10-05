@@ -43,12 +43,18 @@ def main() -> int:
     ap.add_argument("--endpoint-samples", type=int, default=20,
                     help="samples for good and bad (calibration may need up to 20 per side)")
     ap.add_argument("--repeat", type=int, default=5)
-    ap.add_argument("--timeout", type=float, default=900)
+    ap.add_argument("--timeout", type=float, help="seconds per process (default: 300 for --probe, 900 otherwise)")
     ap.add_argument("--case")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--probe", action="store_true", help="only time ONE process per case (at bad), write probe.jsonl")
     ap.add_argument("--max-process", type=float, help="skip cases whose probed process time exceeds this (seconds)")
     args = ap.parse_args()
+    if args.timeout is None:
+        args.timeout = 300 if args.probe else 900
+    from perfhound.bench.runner import default_memory_limit_mb
+    mem = default_memory_limit_mb()
+    print(f"limits per process: {args.timeout:.0f} s, " + (f"{mem} MB memory" if mem else
+          "NO memory limit (pip install psutil to protect the laptop from runaway workloads)"), flush=True)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
