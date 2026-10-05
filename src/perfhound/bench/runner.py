@@ -83,8 +83,9 @@ class BenchmarkRunner:
             self._trees.move_to_end(commit)
             return self._trees[commit].path
         if len(self._trees) >= self.max_worktrees:
-            _, old = self._trees.popitem(last=False)
+            evicted, old = self._trees.popitem(last=False)
             old.close()
+            self._warm.discard(evicted)      # a fresh checkout has no .pyc files: warm it up again
         t0 = time.perf_counter()
         wt = WorktreeManager(self.repo, base_dir=self.worktree_dir)
         path = wt.checkout(commit)
