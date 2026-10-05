@@ -7,6 +7,8 @@ Per case: build the era-matched env (uv --exclude-newer), then measure with ABBA
   culprit^ vs culprit   is the ground-truth change real here, in the expected direction?
   good     vs bad       does the window as a whole show it (what the localizer will see)?
 A case the scheduler can't SEE cannot be localized - unmeasurable cases are reported, not hidden.
+Workloads the static audit flags (bench/audit.py: a pasted copy of the code under test,
+syntax error, missing) are skipped unless --include-flagged.
 Results are appended per case to <out>/results.jsonl; re-running skips finished cases.
 The culprit is used here ONLY to verify ground truth, never by the localizer.
 """
@@ -22,8 +24,8 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from perfhound.bench import (BenchmarkError, BenchmarkRunner, EnvError, EnvManager, infer_env, ratio_ci,
-                             verdict)
+from perfhound.bench import (BenchmarkError, BenchmarkRunner, EnvError, EnvManager, audit_workload, infer_env,
+                             ratio_ci, verdict)
 from perfhound.gateway import RegressionCase
 from perfhound.gateway.fetcher import RepoFetcher
 from perfhound.gateway.gitcmd import run_git
@@ -49,6 +51,8 @@ def main() -> int:
     ap.add_argument("--repeat", type=int, default=5, help="workload repetitions inside one process")
     ap.add_argument("--timeout", type=float, default=900)
     ap.add_argument("--min-effect", type=float, default=0.05)
+    ap.add_argument("--include-flagged", action="store_true",
+                    help="also run workloads the static audit flags (inlined copy of the code under test)")
     ap.add_argument("--no-endpoints", action="store_true", help="skip good vs bad")
     args = ap.parse_args()
 
@@ -72,9 +76,12 @@ def main() -> int:
         rec = {"case_id": case.case_id, "direction": case.direction,
                "expected_ratio": (1 / case.metadata["truth_expert_speedup"]) if case.metadata.get("truth_expert_speedup") else None}
         t0 = time.perf_counter()
+        audit, why = audit_workload(case.benchmark.workload if case.benchmark else None)
+        rec["audit"] = audit
+        if audit in ("no_workload", "syntax_error") or (audit != "clean" and not args.include_flagged):
+            print(f"  => skipped: workload audit = {audit} {why[:4]}")
+            continue          # not written to results: re-run with --include-flagged to measure it anyway
         try:
-            if not (case.benchmark and case.benchmark.workload):
-                raise BenchmarkError("no workload in the case")
             repo = fetcher.fetch(case.repo)
             date = datetime.fromisoformat(run_git(repo, "show", "-s", "--format=%cI", case.bad).stdout.strip())
             spec = infer_env(case, date)

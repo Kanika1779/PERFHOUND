@@ -111,6 +111,11 @@ def _uv() -> list[str]:
     raise EnvError("uv is not installed:  pip install uv   (or pip install -e \".[bench]\")")
 
 
+def _last_line(text: str) -> str:
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    return " | ".join(lines[-3:])[:400] if lines else "(no error text)"
+
+
 def default_envs_dir() -> Path:
     base = os.environ.get("PERFHOUND_CACHE_DIR")
     return (Path(base) if base else Path.home() / ".perfhound") / "envs"
@@ -138,6 +143,7 @@ class EnvManager:
             p = self._run([*uv, "venv", "--python", py, str(d)])
             if p.returncode != 0:
                 errors.append(f"venv python {py}: {p.stderr.strip()[-600:]}")
+                self._log(f"python {py} failed: {_last_line(p.stderr)}")
                 continue
             cmd = [*uv, "pip", "install", "--python", str(_venv_python(d))]
             if spec.exclude_newer:
@@ -145,6 +151,7 @@ class EnvManager:
             p = self._run([*cmd, *spec.requirements])
             if p.returncode != 0:
                 errors.append(f"install on python {py}: {p.stderr.strip()[-1500:]}")
+                self._log(f"install on python {py} failed: {_last_line(p.stderr)}")
                 continue
             ready.write_text(json.dumps({**asdict(spec), "python_used": py}, indent=2), encoding="utf-8")
             return _venv_python(d)

@@ -135,3 +135,16 @@ def test_ratio_ci_and_verdict():
     assert verdict(r, lo, hi) == "unclear"
     r, lo, hi = ratio_ci(before, [1.3, 1.31, 1.29, 1.3, 1.32, 1.3])
     assert verdict(r, lo, hi) == "slower"
+
+
+def test_workload_audit():
+    from perfhound.bench import audit_workload
+
+    assert audit_workload(WORKLOAD) == ("clean", [])
+    assert audit_workload(None)[0] == "no_workload"
+    assert audit_workload("def f(:\n")[0] == "syntax_error"
+    body = "\n".join(f"    x{i} = {i}" for i in range(15))
+    copied = f"# _primepi copied directly from the post-edit source file\ndef _primepi(n):\n{body}\n    return n\n" + WORKLOAD
+    status, why = audit_workload(copied)
+    assert status == "inlines_code" and "copied" in why and any("_primepi" in w for w in why)
+    assert audit_workload("# a copy of the data\n" + WORKLOAD)[0] == "mentions_copy"
