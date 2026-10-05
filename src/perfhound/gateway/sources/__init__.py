@@ -99,7 +99,7 @@ register_source("git", GitRangeAdapter)
 
 def _load_builtin_adapters() -> None:
     """Dataset adapters register themselves on import."""
-    from . import swefficiency, yaml_spec  # noqa: F401
+    from . import asv_runner, swefficiency, yaml_spec  # noqa: F401
 
 
 _load_builtin_adapters()
