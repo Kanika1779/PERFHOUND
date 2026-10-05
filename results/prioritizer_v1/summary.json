@@ -1,0 +1,52 @@
+{
+  "cases": 68,
+  "model": "gemini-3.5-flash-lite",
+  "retriever": "hybrid",
+  "top_k": 10,
+  "w": 0.7,
+  "eps": 0.05,
+  "redact": true,
+  "hide_message": false,
+  "llm_failures": 0,
+  "llm+retr_vs_retrieval_bits": {
+    "better": 68,
+    "worse": 0,
+    "same": 0
+  },
+  "cache_hits": 73,
+  "api_calls": 63,
+  "prompt_tokens": 466838,
+  "output_tokens": 30623,
+  "table": [
+    {
+      "method": "uniform",
+      "recall@1": null,
+      "mrr": null,
+      "mean_bits": 4.321928094887363
+    },
+    {
+      "method": "retrieval",
+      "recall@1": 0.8529411764705882,
+      "recall@3": 0.9558823529411765,
+      "recall@5": 0.9852941176470589,
+      "mrr": 0.9102124183006536,
+      "mean_bits": 2.5974283466670878
+    },
+    {
+      "method": "llm+retr",
+      "recall@1": 1.0,
+      "recall@3": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "mean_bits": 0.7776951189224073
+    },
+    {
+      "method": "llm only",
+      "recall@1": 1.0,
+      "recall@3": 1.0,
+      "recall@5": 1.0,
+      "mrr": 1.0,
+      "mean_bits": 0.39550343981752106
+    }
+  ]
+}
