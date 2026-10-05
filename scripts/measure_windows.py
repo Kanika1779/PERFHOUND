@@ -83,6 +83,9 @@ def main() -> int:
             continue                                  # failed probes are retried
         dest = out / (safe_name(case.case_id) + ".json")
         rec = json.loads(dest.read_text(encoding="utf-8")) if dest.exists() and not args.probe else None
+        if rec is not None and "times" not in rec:
+            raise SystemExit(f"{dest} was recorded by an older version (median only, no raw times). "
+                             f"Move it away (or use another --out) and record again.")
         if rec and rec.get("complete"):
             print(f"[{i}/{len(cases)}] {case.case_id}: complete, skipping")
             continue
@@ -107,8 +110,8 @@ def main() -> int:
                     rec = {"case_id": case.case_id, "direction": case.direction, "commits": commits,
                            "culprit_index": commits.index(case.culprit),      # scoring only
                            "env": {"python": spec.python, "requirements": list(spec.requirements), "as_of": spec.exclude_newer},
-                           "repeat": args.repeat, "samples": {c: [] for c in commits}, "wall": {c: [] for c in commits},
-                           "complete": False}
+                           "repeat": args.repeat, "stat": "mean", "samples": {c: [] for c in commits},
+                           "times": {c: [] for c in commits}, "wall": {c: [] for c in commits}, "complete": False}
                 rng = random.Random(f"{case.case_id}:{len(rec['samples'][commits[0]])}")
                 with BenchmarkRunner(case, repo, python, inner_repeat=args.repeat, timeout=args.timeout,
                                      max_worktrees=len(commits)) as r:
@@ -120,6 +123,7 @@ def main() -> int:
                         for c in order:
                             s = r.run_once(c)
                             rec["samples"][c].append(s.value)
+                            rec["times"][c].append(s.times)
                             rec["wall"][c].append(round(s.wall, 2))
                         rec["python_used"] = s.python
                         dest.write_text(json.dumps(rec), encoding="utf-8")
@@ -129,6 +133,7 @@ def main() -> int:
                         for c in ends:                       # interleaved good/bad, as calibration does
                             s = r.run_once(c)
                             rec["samples"][c].append(s.value)
+                            rec["times"][c].append(s.times)
                             rec["wall"][c].append(round(s.wall, 2))
                         dest.write_text(json.dumps(rec), encoding="utf-8")
                     print(f"  endpoints: {args.endpoint_samples} samples each", flush=True)

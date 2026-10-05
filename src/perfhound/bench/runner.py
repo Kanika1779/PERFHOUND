@@ -1,7 +1,7 @@
 """Benchmark Runner: measure a case's benchmark at any commit.
 
 One SAMPLE = one fresh Python process that runs the workload `inner_repeat` times;
-its value is the median per-call time of those repetitions. Fresh processes make
+its value is the MEAN per-call time of those repetitions (see STATS for why not the median). Fresh processes make
 samples close to independent (what SPRT assumes); the median inside a process
 damps one-off hiccups (GC, a background app waking up).
 
@@ -94,6 +94,16 @@ def read_metric(metric: dict, stdout: str, wall: float) -> float:
     raise BenchmarkError(f"unknown metric type {kind!r}")
 
 
+# How one process's repetitions become ONE sample value.
+#   mean   (default) - SWE-fficiency's own definition (mean of timeit.repeat). Includes the first, COLD
+#                      repetition: workloads whose later repetitions hit a cache (sympy @cacheit when the
+#                      workload's cache-clearing does not work, e.g. sympy-21455: 0.6 us warm) are measured
+#                      by their real cost, not by a cache lookup.
+#   median            - damps one-off hiccups but measured cache hits on such workloads (found 2026-10-05).
+#   first             - the cold repetition only.
+STATS = {"mean": statistics.mean, "median": statistics.median, "first": lambda v: v[0], "min": min}
+
+
 class BenchmarkError(RuntimeError):
     pass
 
@@ -101,7 +111,7 @@ class BenchmarkError(RuntimeError):
 @dataclass
 class Sample:
     commit: str
-    value: float                      # seconds per call (median of the process's repetitions)
+    value: float                      # seconds per call (runner.stat of the process's repetitions; default mean)
     times: list[float] = field(default_factory=list)
     wall: float = 0.0                 # seconds the whole process took
     python: str = ""
@@ -110,7 +120,8 @@ class Sample:
 class BenchmarkRunner:
     def __init__(self, case: RegressionCase, repo: str | Path, python: str | Path, *, inner_repeat: int = 5,
                  timeout: float = 900, warmup: int = 1, max_worktrees: int = 4, pin_threads: bool = True,
-                 worktree_dir: str | Path | None = None, log=None, max_memory_mb: int | None = -1) -> None:
+                 worktree_dir: str | Path | None = None, log=None, max_memory_mb: int | None = -1,
+                 stat: str = "mean") -> None:
         b = case.benchmark
         if b is None:
             raise BenchmarkError(f"case has no benchmark ({case.case_id})")
@@ -121,6 +132,9 @@ class BenchmarkRunner:
         if b.framework not in ("script", "command"):
             raise BenchmarkError(f"framework {b.framework!r} not supported yet ('script' or 'command')")
         self.framework = b.framework
+        if stat not in STATS:
+            raise BenchmarkError(f"stat must be one of {sorted(STATS)}")
+        self.stat = stat
         self.case = case
         self.repo = Path(repo)
         self.python = str(python)
@@ -211,7 +225,7 @@ class BenchmarkRunner:
         data = json.loads(line[len(MARK):])
         number = data["number"] or 1
         per_call = [t / number for t in data["times"]]
-        return Sample(commit, statistics.median(per_call), per_call, wall, data.get("python", ""))
+        return Sample(commit, STATS[self.stat](per_call), per_call, wall, data.get("python", ""))
 
     def _run_guarded(self, cmd, env: dict, commit: str, *, shell: bool = False, cwd: Path | None = None,
                      timeout: float | None = None) -> tuple[int, str, str]:

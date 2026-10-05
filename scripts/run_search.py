@@ -41,6 +41,8 @@ def main() -> int:
     ap.add_argument("--priors", help="JSONL from eval_prioritizer.py --dump-priors")
     ap.add_argument("--repeats", type=int, default=50)
     ap.add_argument("--out", default="results/search_v1")
+    ap.add_argument("--stat", choices=["mean", "median", "first", "min"], default="mean",
+                    help="per-process statistic recomputed from raw times (primary: mean = SWE-fficiency's definition)")
     args = ap.parse_args()
 
     priors = {}
@@ -55,12 +57,19 @@ def main() -> int:
             continue
         rec = json.loads(p.read_text(encoding="utf-8"))
         if rec.get("complete"):
+            if "times" in rec:
+                import statistics as st
+                f = {"mean": st.mean, "median": st.median, "first": lambda v: v[0], "min": min}[args.stat]
+                rec["samples"] = {c: [f(t) for t in ts] for c, ts in rec["times"].items()}
+            elif args.stat != "median":
+                print(f"  {rec['case_id']}: old recording without raw times - skipped")
+                continue
             windows.append(rec)
     if not windows:
         print("no complete windows found - run scripts/measure_windows.py first")
         return 1
     methods = {m: c for m, c in METHODS.items() if c["prior"] is None or priors}
-    print(f"{len(windows)} recorded cases, {args.repeats} replays each, methods: {', '.join(methods)}", flush=True)
+    print(f"{len(windows)} recorded cases, {args.repeats} replays each, stat={args.stat}, methods: {', '.join(methods)}", flush=True)
 
     rows = []
     for w in windows:
@@ -99,7 +108,7 @@ def main() -> int:
                       "median_runs": statistics.median(r["runs"] for r in rs),
                       "mean_tests": statistics.mean(r["tests"] for r in rs),
                       "reuse_pct": 100 * sum(r["reused"] for r in rs) / max(1, sum(r["runs"] for r in rs))})
-    (out / "summary.json").write_text(json.dumps({"cases": len(windows), "repeats": args.repeats, "table": table}, indent=2),
+    (out / "summary.json").write_text(json.dumps({"cases": len(windows), "repeats": args.repeats, "stat": args.stat, "table": table}, indent=2),
                                       encoding="utf-8")
     print(f"\n{'method':<15}{'cases':>6}{'accuracy':>10}{'no-change':>11}{'mean runs':>11}{'median':>8}{'tests':>7}{'reuse %':>9}")
     for t in table:

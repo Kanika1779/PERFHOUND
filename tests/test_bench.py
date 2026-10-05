@@ -191,3 +191,27 @@ def test_timeout_kills_hung_workload(slow_fast_repo, tmp_path):
         with pytest.raises(BenchmarkError, match="timed out"):
             r.run_once(slow)
         assert __import__("time").monotonic() - t0 < 10
+
+
+CACHED = '''
+import timeit
+from slowpkg.core import work
+_cache = {}
+def setup():
+    pass                                    # "clears the cache" - but does not (like sympy-21455)
+def workload():
+    if "x" not in _cache:
+        work()                              # only the first, cold repetition does the real work
+        _cache["x"] = 1
+timeit.repeat(workload, number=1, repeat=5, setup=setup)
+'''
+
+
+def test_default_stat_mean_sees_cold_cost_that_median_hides(slow_fast_repo, tmp_path):
+    repo, slow, fast = slow_fast_repo
+    case = make_case(repo, slow, fast, workload=CACHED)
+    with BenchmarkRunner(case, repo, sys.executable, inner_repeat=5, worktree_dir=tmp_path / "wt") as r:
+        s = r.run_once(slow)
+    assert s.times[0] > 0.02 and max(s.times[1:]) < 0.005      # cold first, then cache hits
+    assert s.value == pytest.approx(sum(s.times) / 5)          # default statistic = mean
+    assert __import__("statistics").median(s.times) < 0.005    # what the old median recorded
