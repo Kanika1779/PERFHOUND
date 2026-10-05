@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"   # pinned version, not "-latest": results must be reproducible
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
@@ -83,7 +83,8 @@ class GeminiClient:
                     delay = min(delay * 2, 120)
                     continue
                 if e.code == 404:
-                    raise LLMError(f"model {self.model!r} not found - run scripts/check_llm.py to list models") from None
+                    raise LLMError(f"model {self.model!r} unavailable (HTTP 404: {detail}) - "
+                                   f"run scripts/check_llm.py to list models") from None
                 raise LLMError(f"HTTP {e.code} from Gemini: {detail}") from None
             except (urllib.error.URLError, TimeoutError) as e:
                 if attempt < self.max_retries:
