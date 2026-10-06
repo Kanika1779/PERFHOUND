@@ -8,3 +8,6 @@ build/
 dist/
 .perfhound/
 experiments/**/scratch/
+
+# teammate gateway: its own repo (github.com/Kanika1779/PERFHOUND_gateway)
+Perfhound_gateway/
