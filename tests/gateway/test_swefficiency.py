@@ -149,8 +149,11 @@ def test_piggyback_folds_revert_into_a_real_commit(setup):
     assert case.case_id.endswith("_k02_pb")
     cands = Gateway.for_case(case, fetcher=fetcher, cache=False).candidates_for(case)
     assert len(cands) == 4 and cands[1].sha == case.culprit           # no extra commit
-    real = _git(upstream, "log", "--first-parent", "--format=%s%x1f%an%x1f%aI", "main~4..main").splitlines()[::-1]
-    assert [f"{c.subject}\x1f{c.author}\x1f{c.timestamp.isoformat()}" for c in cands] == real   # all metadata real
+    from perfhound.gateway.local_git import parse_git_date
+    real = [line.split("\x1f") for line in
+            _git(upstream, "log", "--first-parent", "--format=%s%x1f%an%x1f%aI%x1f%at", "main~4..main").splitlines()[::-1]]
+    # compare moments, not text: newer git prints UTC as "Z", older as "+00:00"
+    assert [(c.subject, c.author, c.timestamp) for c in cands] == [(s, a, parse_git_date(i, e)) for s, a, i, e in real]
     assert cands[1].subject == "Merge pull request #124 from dev/docs"
     assert "lib.core.compute" in cands[1].changed_functions and "+    for i in range(n):" in cands[1].diff
     assert case.metadata["truth_upstream_of"][case.culprit].startswith("PIGGYBACK:")

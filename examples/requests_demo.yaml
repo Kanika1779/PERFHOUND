@@ -1,0 +1,4 @@
+# End-to-end check of the gateway inside Perfhound (no benchmark needed for `candidates`):
+#   perfhound candidates examples/requests_demo.yaml --github
+compare: https://github.com/psf/requests/compare/v2.32.3...v2.32.4
+language: python

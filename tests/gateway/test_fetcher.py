@@ -127,3 +127,112 @@ def test_relative_base_dir_works(remote, tmp_path, monkeypatch):
     path = RepoFetcher("repos").fetch(remote.url)
     assert path.is_absolute() and (path / ".git").exists()
     assert path == (tmp_path / "repos").resolve() / path.relative_to((tmp_path / "repos").resolve())
+
+
+# -- clone folders never leave the repos folder ------------------------------------------------
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/../../../Documents", "https://github.com/acme/..", "https://github.com/./x",
+    "git@github.com:../../Documents", "https://../outside", "https://github.com/acme/.../x",
+])
+def test_urls_with_dot_segments_are_refused(url, tmp_path):
+    with pytest.raises(FetchError):
+        local_dir_for(url, tmp_path / "repos")
+
+
+def test_remove_never_deletes_outside_the_repos_folder(tmp_path):
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "notes.txt").write_text("important")
+    (tmp_path / "repos" / "github.com").mkdir(parents=True)     # exists after any GitHub clone
+    with pytest.raises(FetchError):
+        RepoFetcher(tmp_path / "repos").remove("https://github.com/../../victim")
+    assert (victim / "notes.txt").read_text() == "important"
+
+
+def test_file_urls_still_work_with_dots_in_the_path(remote, tmp_path):
+    (remote.path.parent / "x").mkdir()
+    odd = remote.path.parent / "x" / ".." / remote.path.name     # file URL paths are hashed, never used
+    path = RepoFetcher(tmp_path / "repos").fetch("file://" + odd.as_posix())
+    assert (path / ".git").exists() and path.is_relative_to((tmp_path / "repos").resolve())
+
+
+
+@pytest.mark.parametrize("url", ["file://C:/Users/me/x/../repo",      # Windows: drive in the host slot
+                                 "file://server/share/../repo"])      # UNC-style host
+def test_file_urls_with_a_host_are_hashed_too(url, tmp_path):
+    dest = local_dir_for(url, tmp_path / "repos")
+    assert dest.parent.name == "local" and dest.name.startswith("_")
+
+# -- clones follow upstream ---------------------------------------------------------------------
+
+def _branch(remote):
+    return remote.git("symbolic-ref", "--short", "HEAD")
+
+
+def test_branch_names_follow_upstream(remote, tmp_path):
+    f = RepoFetcher(tmp_path / "repos", refresh_seconds=0)
+    path = f.fetch(remote.url)
+    branch = _branch(remote)
+    remote.git("commit", "-q", "--allow-empty", "-m", "pushed later")
+    new_sha = remote.git("rev-parse", "HEAD")
+    assert run_git_out(path, "rev-parse", branch) != new_sha          # the clone is behind
+    assert f.ensure_commits(path, [GOOD_TAG, branch]) == []
+    assert run_git_out(path, "rev-parse", branch) == new_sha          # ... until a name is asked for
+    assert run_git_out(path, "rev-parse", "HEAD") == new_sha
+
+
+def test_moved_tags_follow_upstream(remote, tmp_path):
+    f = RepoFetcher(tmp_path / "repos", refresh_seconds=0)
+    path = f.fetch(remote.url)
+    remote.git("commit", "-q", "--allow-empty", "-m", "release")
+    remote.git("tag", "-f", BAD_TAG)
+    assert f.ensure_commits(path, [BAD_TAG]) == []
+    assert run_git_out(path, "rev-parse", BAD_TAG + "^{commit}") == remote.git("rev-parse", "HEAD")
+
+
+def test_refresh_is_rate_limited_and_full_shas_need_no_network(remote, tmp_path, monkeypatch):
+    f = RepoFetcher(tmp_path / "repos", refresh_seconds=3600)
+    path = f.fetch(remote.url)
+    sha = run_git_out(path, "rev-parse", GOOD_TAG + "^{commit}")
+    calls = []
+    real_update = RepoFetcher.update
+    monkeypatch.setattr(RepoFetcher, "update", lambda self, p, **kw: calls.append(kw) or real_update(self, p, **kw))
+    assert f.ensure_commits(path, [sha]) == [] and calls == []        # full SHA present: no network
+    assert f.update(path) is False                                    # just cloned: still fresh
+    assert f.update(path, max_age=0) is True
+
+
+def test_local_only_branches_survive_a_refresh(remote, tmp_path):
+    f = RepoFetcher(tmp_path / "repos", refresh_seconds=0)
+    path = f.fetch(remote.url)
+    run_git_out(path, "branch", "perfhound/case-1", GOOD_TAG)
+    remote.git("commit", "-q", "--allow-empty", "-m", "pushed later")
+    assert f.update(path, max_age=0)
+    assert run_git_out(path, "rev-parse", "perfhound/case-1") == run_git_out(path, "rev-parse", GOOD_TAG + "^{commit}")
+
+
+def test_offline_refresh_warns_and_keeps_the_copy(remote, tmp_path):
+    from perfhound.gateway.fetcher import FetchWarning
+    f = RepoFetcher(tmp_path / "repos", refresh_seconds=0)
+    path = f.fetch(remote.url)
+    branch = _branch(remote)
+    before = run_git_out(path, "rev-parse", branch)
+    run_git_out(path, "remote", "set-url", "origin", (tmp_path / "gone").as_uri())
+    with pytest.warns(FetchWarning, match="existing copy"):
+        assert f.update(path, max_age=0) is False
+    with pytest.warns(FetchWarning):
+        assert f.ensure_commits(path, [branch]) == []
+    assert run_git_out(path, "rev-parse", branch) == before
+
+
+def test_users_own_repo_is_never_refreshed(fresh_fixture_repo, tmp_path):
+    f = RepoFetcher(tmp_path / "repos")
+    assert not f.is_managed(fresh_fixture_repo.path)
+    with pytest.raises(FetchError, match="not a clone made by RepoFetcher"):
+        f.update(fresh_fixture_repo.path)
+
+
+def run_git_out(path, *args):
+    from perfhound.gateway.gitcmd import git_out
+    return git_out(path, *args)

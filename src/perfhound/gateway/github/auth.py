@@ -4,7 +4,7 @@ Programs cannot log in to GitHub with a password (since 2021); they use a person
 token. Looked for in this order, first match wins:
     1. environment variable PERFHOUND_GITHUB_TOKEN
     2. environment variable GITHUB_TOKEN
-    3. the file written by `perfhound github login`:  ~/.perfhound/credentials.json
+    3. the file written by `python -m perfhound.gateway login`:  ~/.perfhound/credentials.json
 The file lives in the user's home folder - never in the project, so it cannot be committed.
 The token is checked with GitHub BEFORE it is saved, is written atomically (temp file +
 rename), and is only ever shown masked ("ghp_...5678"). Without a token GitHub allows 60

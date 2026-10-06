@@ -12,8 +12,10 @@ What makes these cases valuable (unlike SWE-fficiency):
   * a REGRESSION, not a deliberate optimization;
   * the benchmark was written independently of the culprit (it is pandas' own suite);
   * the culprit was found by CI, not by the culprit's author.
-Ground truth = the flagged commit ("reported"). Caveat (documented, not hidden): if a run was
-skipped, the true culprit could be an earlier commit since the previous run.
+Ground truth = the flagged commit, labelled "detected": an automatic CI detector flagged it,
+nobody confirmed it (see GROUND_TRUTH_KINDS in cases.py). Caveats (documented, not hidden):
+a flag can be benchmark noise, and if a run was skipped the true culprit could be an earlier
+commit since the previous run. Re-measure good / culprit's parent / culprit before trusting one.
 
 Case = a window of n real main-line commits with the flagged commit at a random position
 (same method as swefficiency-real). The symptom shown to the localizer is the benchmark name,
@@ -136,7 +138,7 @@ def build_asv_case(repo: Path, reg: AsvRegression, n: int, position_k: int, main
     regressed = "; ".join(sorted({f"{b['name']}({b['params']})" if b["params"] else b["name"] for b in reg.benchmarks}))
     return RegressionCase(
         case_id=f"asv-runner:{case_name}", source="asv-runner", repo=repo_url, language="python",
-        good=good, bad=cands[-1], culprit=reg.commit, ground_truth="reported", regression_type="ci_detected",
+        good=good, bad=cands[-1], culprit=reg.commit, ground_truth="detected", regression_type="ci_detected",
         direction="slower", expected_magnitude=main["pct"] / 100 if main.get("pct") else None,
         benchmark=BenchmarkSpec(name=main["name"], framework="asv", workload=src,
                                 params={"asv_params": main["params"], "regressed": regressed}),

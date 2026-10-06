@@ -37,8 +37,9 @@ USER_AGENT = "perfhound-gateway"
 Transport = Callable[[str, str, dict, float], "tuple[int, dict, bytes]"]
 
 
-def urllib_transport(method: str, url: str, headers: dict, timeout: float) -> tuple[int, dict, bytes]:
-    req = urllib.request.Request(url, method=method, headers=headers)
+def urllib_transport(method: str, url: str, headers: dict, timeout: float,
+                     body: bytes | None = None) -> tuple[int, dict, bytes]:
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, dict(resp.headers.items()), resp.read()
@@ -82,10 +83,25 @@ class GitHubClient:
             headers["Authorization"] = f"Bearer {self.token}"
         if etag:
             headers["If-None-Match"] = etag
+        return self._send("GET", url, headers, None, path)
+
+    def graphql(self, query: str, variables: dict | None = None) -> Response:
+        """POST /graphql. GitHub's GraphQL API needs a token (no anonymous access).
+        Errors inside a 200 answer are left in resp.data["errors"] for the caller."""
+        headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": USER_AGENT}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
+        return self._send("POST", self.base_url + "/graphql", headers, payload, "/graphql")
+
+    def _send(self, method: str, url: str, headers: dict, payload: bytes | None, path: str) -> Response:
         delay = 1.0
         for attempt in range(self.max_retries + 1):
             try:
-                status, raw_headers, body = self.transport("GET", url, headers, self.timeout)
+                if payload is None:
+                    status, raw_headers, body = self.transport(method, url, headers, self.timeout)
+                else:
+                    status, raw_headers, body = self.transport(method, url, headers, self.timeout, body=payload)
             except OSError as e:                                 # network down, DNS, reset, timeout
                 if attempt < self.max_retries:
                     self.requests += 1
@@ -138,7 +154,7 @@ class GitHubClient:
         message = _message(text)
         if status == 401:
             raise GitHubAuthError("GitHub rejected the token (wrong, expired or revoked) - run "
-                                  "`perfhound github login` again")
+                                  "`python -m perfhound.gateway login` again")
         if status == 404:
             raise GitHubNotFound(f"{path}: not found - check the link, or the token cannot see this private repository")
         if status in (403, 429) and (h.get("x-ratelimit-remaining") == "0" or "rate limit" in message.lower()
@@ -147,7 +163,7 @@ class GitHubClient:
             if reset is None and h.get("retry-after", "").isdigit():
                 reset = int(time.time()) + int(h["retry-after"])
             raise GitHubRateLimited("GitHub request limit reached" + ("" if self.token else
-                                    " (no token: 60/hour - `perfhound github login` raises it to 5,000)"), reset)
+                                    " (no token: 60/hour - `python -m perfhound.gateway login` raises it to 5,000)"), reset)
         if status >= 500:
             raise GitHubRequestFailed(f"GitHub server error {status} on {path} (retried {self.max_retries} times)")
         raise GitHubRequestFailed(f"GitHub answered {status} on {path}: {message[:200]}")

@@ -24,7 +24,7 @@ from .cases import RegressionCase
 from .errors import GatewayError
 from .fetcher import RepoFetcher
 from .gitcmd import run_git
-from .local_git import DEFAULT_MAX_DIFF_CHARS, DEFAULT_MAX_DIFF_LINES, LocalGitProvider
+from .local_git import DEFAULT_MAX_DIFF_CHARS, DEFAULT_MAX_DIFF_LINES, LocalGitProvider, parse_git_date
 from .models import SCHEMA_VERSION, CandidateCommit
 from .range import CommitRange, find_repo_root, resolve_range
 from .snapshot import Snapshot, build_snapshot
@@ -66,12 +66,20 @@ class Gateway:
         max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
         github=None,
         github_repo=None,
+        time_rule: bool = True,
+        batch_size: int = 500,
     ) -> None:
-        """github: a GitHubPRProvider (optional) - attaches PR title/description to each commit.
-        github_repo: RepoRef; default = parsed from the `origin` remote."""
+        """github: a GitHubPRProvider / GitHubGraphQLProvider (optional) - attaches PR title,
+            description and linked issues to each commit.
+        github_repo: RepoRef; default = parsed from the `origin` remote.
+        time_rule: True (evaluation) = no GitHub data that appeared after `bad` landed;
+            False (real use) = everything, e.g. a later "slow since #123" issue.
+        batch_size: commits read / analyzed per step, so big ranges never load all at once."""
         self.repo = find_repo_root(repo)
         self.github = github
         self._github_repo = github_repo
+        self.time_rule = time_rule
+        self.batch_size = max(1, batch_size)
         self.max_diff_lines = max_diff_lines
         self.max_diff_chars = max_diff_chars
         self._local = LocalGitProvider(self.repo, max_diff_lines=max_diff_lines, max_diff_chars=max_diff_chars)
@@ -127,10 +135,17 @@ class Gateway:
         """
         start = time.perf_counter()
         commit_range = self.resolve(good, bad, **range_options)
-        commits, commit_hits = self._load_commits(commit_range)
-        function_hits = 0
-        if analyze:
-            commits, function_hits = self._add_functions(commits)
+        commits: list[CandidateCommit] = []
+        commit_hits = function_hits = 0
+        # `offset`, not `start`: reusing `start` overwrote the timer (stats.seconds became the machine uptime)
+        for offset in range(0, len(commit_range.shas), self.batch_size):    # big ranges: piece by piece
+            part = replace(commit_range, shas=commit_range.shas[offset:offset + self.batch_size])
+            batch, hits = self._load_commits(part)
+            commit_hits += hits
+            if analyze:
+                batch, hits = self._add_functions(batch)
+                function_hits += hits
+            commits.extend(replace(c, position=c.position + offset) for c in batch)
         gh_requests, gh_with_pr, gh_warnings = 0, 0, ()
         if self.github is not None and commits:
             commits, gh = self._add_github(commits)
@@ -155,8 +170,17 @@ class Gateway:
         repo = self.github_repo()
         if repo is None:
             return commits, GitHubStats(warnings=["not a GitHub repository (origin remote) - PR data skipped"])
-        cutoff = max(c.timestamp for c in commits)          # bad = newest commit of the range: TIME RULE
+        cutoff = self.landed_at(commits[-1].sha) if self.time_rule else None
         return self.github.enrich(repo, self.repo_id, commits, cutoff=cutoff)
+
+    def landed_at(self, sha: str) -> datetime:
+        """When `sha` landed on its branch: its COMMITTER date (TIME RULE cut-off for GitHub data).
+
+        Not the author date (CandidateCommit.timestamp): rebase merges and cherry-picks keep the
+        original author date, so code can land days after it was authored.
+        """
+        iso, epoch = run_git(self.repo, "show", "-s", "--format=%cI%x00%ct", sha).stdout.strip().split("\x00")
+        return parse_git_date(iso, epoch)
 
     def snapshot(self, path: str | Path, good: str, bad: str, *, sanitizer=None, **range_options) -> Snapshot:
         """Freeze good..bad into a verified JSON file for reproducible experiments."""

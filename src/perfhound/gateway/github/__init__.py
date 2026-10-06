@@ -7,9 +7,10 @@ from .client import GitHubClient, Response
 from .errors import (GitHubAuthError, GitHubError, GitHubNotFound, GitHubRateLimited, GitHubRequestFailed,
                      InvalidGitHubLink)
 from .links import RepoRef, is_github, linked_issues, parse_commit, parse_compare, parse_pr, parse_repo
+from .graphql import GitHubGraphQLProvider
 from .provider import GitHubPRProvider, GitHubStats
 
 __all__ = ["delete_token", "find_token", "mask", "save_token", "GitHubClient", "Response", "GitHubAuthError",
            "GitHubError", "GitHubNotFound", "GitHubRateLimited", "GitHubRequestFailed", "InvalidGitHubLink",
            "RepoRef", "is_github", "linked_issues", "parse_commit", "parse_compare", "parse_pr", "parse_repo",
-           "GitHubPRProvider", "GitHubStats"]
+           "GitHubPRProvider", "GitHubGraphQLProvider", "GitHubStats"]

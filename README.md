@@ -19,6 +19,14 @@ with gw.worktree() as wt:                         # private checkout in the temp
     folder = wt.checkout(candidates[3].sha)       # your folder is never touched
 ```
 
+Fetch any GitHub range from the terminal (also published as a GitHub Action:
+[Kanika1779/PERFHOUND_gateway](https://github.com/Kanika1779/PERFHOUND_gateway)):
+
+```
+python -m perfhound.gateway login                      # GitHub token, once
+python -m perfhound.gateway range https://github.com/psf/requests --good v2.32.3 --bad v2.32.4 --summary report.md
+```
+
 ## Dev setup
 
 ```bash
@@ -41,8 +49,8 @@ pytest
 | 6 | Worktree Manager | done |
 | 7 | Cache (SQLite) | done |
 | 8 | Snapshot Store | done |
-| 9 | GitHub Provider | - |
-| 10 | Validation on a real repo | - |
+| 9 | GitHub Provider (REST + GraphQL, linked issues, time rule) | done |
+| 10 | Validation on a real repo (psf/requests v2.32.3..v2.32.4: 29/29 PRs) | done |
 
 ## Phase 2: any source, Python + Java
 

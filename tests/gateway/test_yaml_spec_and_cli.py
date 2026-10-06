@@ -3,7 +3,11 @@ import textwrap
 
 import pytest
 
-from perfhound.__main__ import main
+try:
+    from perfhound.__main__ import main
+except ImportError:            # gateway installed on its own: the full Perfhound CLI is not there
+    main = None
+needs_cli = pytest.mark.skipif(main is None, reason="full Perfhound CLI not installed")
 from perfhound.gateway import Gateway
 from perfhound.gateway.fetcher import RepoFetcher
 from perfhound.gateway.sources import open_source
@@ -88,6 +92,7 @@ def test_yaml_source_and_gateway_end_to_end(fixture_repo, tmp_path):
 
 # ------------------------------------------------------------------ CLI
 
+@needs_cli
 def test_cli_sources_and_cases(tmp_path, capsys):
     assert main(["sources"]) == 0
     assert {"yaml", "swefficiency-real", "git"} <= set(capsys.readouterr().out.split())
@@ -99,6 +104,7 @@ def test_cli_sources_and_cases(tmp_path, capsys):
     assert "c0ffee" in capsys.readouterr().out
 
 
+@needs_cli
 def test_cli_candidates_table_and_json(fresh_fixture_repo, tmp_path, capsys):
     repo = fresh_fixture_repo
     (repo.path / "mathops.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8", newline="\n")
@@ -112,6 +118,7 @@ def test_cli_candidates_table_and_json(fresh_fixture_repo, tmp_path, capsys):
     assert len(rows) == 8 and rows[0]["position"] == 0
 
 
+@needs_cli
 def test_cli_reports_errors_in_one_line(tmp_path, capsys):
     assert main(["candidates", str(tmp_path / "missing.yaml")]) == 1
     err = capsys.readouterr().err

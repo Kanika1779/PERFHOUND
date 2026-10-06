@@ -71,7 +71,7 @@ def test_adapter_builds_windows_without_leaking(tmp_path):
     cases = list(src.cases())
     assert len(cases) + len(src.failures) == 2
     case = next(c for c in cases if c.metadata["truth_issue"] == 169)
-    assert case.culprit == shas[6] and case.direction == "slower" and case.ground_truth == "reported"
+    assert case.culprit == shas[6] and case.direction == "slower" and case.ground_truth == "detected"
     window = run_git(repo, "rev-list", "--first-parent", "--reverse", f"{case.good}..{case.bad}").stdout.split()
     assert len(window) == 4 and window.index(shas[6]) + 1 == case.metadata["truth_position"]
     assert "class Arithmetic" in case.benchmark.workload and case.benchmark.name == "sparse.Arithmetic.time_divide"

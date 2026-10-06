@@ -61,12 +61,19 @@ def cmd_cases(args) -> int:
 
 
 def _github_provider(fields: str = "title+body"):
-    """GitHub PR provider with the saved/env token (works without a token too: 60 requests/hour)."""
+    """GitHub PR provider with the saved/env token.
+
+    With a token: GraphQL, 50 commits per request (PRs + linked issues). Without one: REST,
+    1 request per commit, 60 requests/hour - `perfhound github login` raises it to 5,000.
+    """
     from perfhound.gateway.cache import Cache
-    from perfhound.gateway.github import GitHubClient, GitHubPRProvider, find_token
+    from perfhound.gateway.github import GitHubClient, GitHubGraphQLProvider, GitHubPRProvider, find_token
 
     token, _ = find_token()
-    return GitHubPRProvider(GitHubClient(token), Cache(), fields=fields)
+    client = GitHubClient(token)
+    if token:
+        return GitHubGraphQLProvider(client, Cache(), fields=fields)
+    return GitHubPRProvider(client, Cache(), fields=fields)
 
 
 def cmd_github(args) -> int:

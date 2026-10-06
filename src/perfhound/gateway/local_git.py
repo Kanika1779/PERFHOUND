@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -57,6 +57,28 @@ class RawCommitInfo:
     timestamp: datetime
     message: str
     files: tuple[FileChange, ...]
+
+
+def parse_git_date(iso: str, epoch: str | int | None = None) -> datetime:
+    """Git ISO-8601 date (%aI / %cI) -> timezone-aware datetime.
+
+    Newer git prints UTC as "Z" (older: "+00:00"); Python 3.10 cannot read "Z" - handled.
+    Old histories contain broken time zones (requests, 2011: "+051800", printed by git as
+    "+518:00"), which Python cannot parse. Then the moment comes from the epoch seconds
+    (%at / %ct, always correct), in UTC.
+    """
+    iso = iso.strip()
+    if iso.endswith("Z"):
+        iso = iso[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.utcoffset() is not None and (epoch is None or int(dt.timestamp()) == int(epoch)):
+            return dt
+    except (ValueError, OverflowError):
+        pass
+    if epoch is None or not str(epoch).strip():
+        raise GatewayError(f"cannot parse git date {iso!r}")
+    return datetime.fromtimestamp(int(epoch), timezone.utc)
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +135,7 @@ def read_commit_info(repo: str | Path, shas: Sequence[str]) -> list[RawCommitInf
         "--raw",
         "--numstat",
         "-z",
-        "--format=%x1e%H%x00%P%x00%an%x00%aI%x00%B%x00",
+        "--format=%x1e%H%x00%P%x00%an%x00%aI%x00%at%x00%B%x00",
         input="\n".join(shas) + "\n",
     )
     tokens = proc.stdout.split("\x00")
@@ -128,9 +150,9 @@ def read_commit_info(repo: str | Path, shas: Sequence[str]) -> list[RawCommitInf
         sha = m.group(1)
         parents = tuple(tokens[i + 1].split())
         author = tokens[i + 2]
-        timestamp = datetime.fromisoformat(tokens[i + 3])
-        message = tokens[i + 4].rstrip("\n")
-        i += 5
+        timestamp = parse_git_date(tokens[i + 3], tokens[i + 4])
+        message = tokens[i + 5].rstrip("\n")
+        i += 6
         j = i
         while j < n and not _HEADER_RE.match(tokens[j].lstrip("\n")):
             j += 1
