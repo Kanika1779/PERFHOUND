@@ -93,3 +93,16 @@ def test_read_metric():
     assert read_metric({"type": "json", "key": "stats.mean"}, 'noise\n{"stats": {"mean": 0.25}}\n', 9) == 0.25
     with pytest.raises(BenchmarkError):
         read_metric({"type": "regex", "pattern": r"took ([0-9.]+)"}, "nothing", 9)
+
+
+def test_commit_date_of_an_annotated_tag(tmp_path):
+    """Release tags are often annotated/signed (networkx-3.3): the date must be the commit's, not a crash."""
+    from perfhound.localize import commit_date
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    run_git(repo, "init", "-q")
+    sha = commit(repo, {"a.py": "x = 1\n"}, "one")
+    run_git(repo, "-c", "user.name=rel", "-c", "user.email=rel@x", "tag", "-a", "v1", "-m", "release v1\n\nnotes")
+    want = run_git(repo, "show", "-s", "--format=%ct", sha).stdout.strip()
+    assert int(commit_date(repo, "v1").timestamp()) == int(want) == int(commit_date(repo, sha).timestamp())

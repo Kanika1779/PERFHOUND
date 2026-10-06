@@ -1,0 +1,33 @@
+name: sympy__sympy-15909
+repo: https://github.com/sympy/sympy
+language: python
+good: 7f07e19289e41d6fa7135cd51f74fef82cf2cabd
+bad: e8cf4260af7461a42db9ed4edb2ab3fe442507c7
+direction: faster
+benchmark:
+  name: workload
+  framework: script
+  workload: "import timeit\nimport statistics\nimport random\nimport sys\nimport os\n\n# Assume sympy is installed or available in the Python path.\n# If running this script standalone and sympy is not\
+    \ installed,\n# you might need to adjust sys.path to point to the sympy root directory.\ntry:\n    from sympy.ntheory.factor_ import trailing\nexcept ImportError:\n    # Fallback for local testing if\
+    \ sympy is not installed globally\n    # This block is for development convenience and should ideally not be needed\n    # if sympy is properly installed or the script is run within the sympy project.\n\
+    \    # Adjust the path as necessary for your local setup.\n    sympy_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))\n    if os.path.exists(os.path.join(sympy_path, 'sympy',\
+    \ '__init__.py')):\n        sys.path.insert(0, sympy_path)\n        from sympy.ntheory.factor_ import trailing\n    else:\n        raise\n\n\ndef setup():\n    \"\"\"\n    Prepares a list of large integers\
+    \ for the performance test.\n    The numbers are specifically crafted to target the optimized code path\n    in the `trailing` function, which applies to numbers `n` where:\n    1. `n` has at least\
+    \ 8 trailing zeros (so `n & 0xff` is 0).\n    2. `floor(log2(n))` (referred to as `z` in the diff) is less than 300.\n\n    This ensures the new 8-byte reduction loop is exercised.\n    \"\"\"\n   \
+    \ global numbers_to_test\n    random.seed(42) # For reproducibility\n\n    numbers_to_test = []\n    num_samples = 2000 # Number of integers to test in each workload run\n\n    for _ in range(num_samples):\n\
+    \        # Choose a number of trailing zeros (tz) between 8 and 150.\n        # This ensures `n & 0xff` is 0, bypassing the `small_trailing` lookup\n        # and entering the 8-byte reduction loop.\n\
+    \        # It also keeps `tz` small enough to allow `n < 2**300`.\n        tz = random.randint(8, 150)\n\n        # Generate a large odd number for the non-zero part of `n`.\n        # The bit length\
+    \ of this odd part is chosen such that `n` remains\n        # less than `2**300` when combined with `tz`.\n        # `floor(log2(n)) = floor(log2(odd_part)) + tz`.\n        # If `odd_part` is 140 bits,\
+    \ `floor(log2(odd_part))` is at most 139.\n        # Max `floor(log2(n))` would be `139 + 150 = 289`, which is `< 300`.\n        odd_part_bit_length = 140\n        odd_part = random.getrandbits(odd_part_bit_length)\
+    \ | 1 # Ensure it's odd and large\n\n        # Construct the number with `tz` trailing zeros\n        n = odd_part << tz\n        numbers_to_test.append(n)\n\n    # Add some powers of 2 within the target\
+    \ range (these also satisfy n < 2**300)\n    # These are important as they represent a specific case where the `small_trailing`\n    # lookup after the 8-byte shifts would return 0.\n    for z_power\
+    \ in range(8, 299, 15): # Step by 15 to get a few distinct powers of 2\n        numbers_to_test.append(1 << z_power)\n\n    # Shuffle the list to mix up the types of numbers and prevent any\n    # order-dependent\
+    \ caching or branch prediction effects.\n    random.shuffle(numbers_to_test)\n\n\ndef workload():\n    \"\"\"\n    Executes the `trailing` function on all numbers prepared in `setup()`.\n    \"\"\"\n\
+    \    global numbers_to_test\n    # Store results to prevent potential dead code elimination by the interpreter\n    # if the return value of `trailing` were not used.\n    results = []\n    for n_val\
+    \ in numbers_to_test:\n        results.append(trailing(n_val))\n\n\n# Run the benchmark using timeit.repeat\n# 'number=1' means the entire `workload` function (which iterates over `numbers_to_test`)\n\
+    # is executed once per timing measurement.\n# 'repeat=10' means this measurement is repeated 10 times to gather statistics.\nruntimes = timeit.repeat(workload, number=1, repeat=10, setup=setup)\n\n\
+    # Print the mean and standard deviation of the measured runtimes\nprint(\"Mean:\", statistics.mean(runtimes))\nprint(\"Std Dev:\", statistics.stdev(runtimes))"
+  metric:
+    type: wall_time
+culprit: 1bd5d04ffe2b47b91fd03a868ca31c3c3f9e243e
+ground_truth: reported

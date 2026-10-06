@@ -1,0 +1,25 @@
+name: pydata__xarray-9001
+repo: https://github.com/pydata/xarray
+language: python
+good: 6d62719061f7b9cbed3ea01c4adf2ce89c4f015f
+bad: c4031cd67c6e56f398414c27aab306656d8af517
+direction: faster
+benchmark:
+  name: workload
+  framework: script
+  workload: "import timeit\nimport statistics\nimport numpy as np\nimport pandas as pd\nfrom xarray.core.variable import Variable\nfrom xarray.core.indexing import PandasIndexingAdapter\n\ndef setup():\n\
+    \    \"\"\"\n    Prepares a realistic, non-trivial dataset for the benchmark.\n    \n    We create a large pandas.Index and then wrap it in a PandasIndexingAdapter.\n    This setup is designed to specifically\
+    \ target the code path optimized\n    by the diff: creating an xarray.Variable with `fastpath=True` when the\n    input data is already an `ExplicitlyIndexed` object (like PandasIndexingAdapter).\n\
+    \    The optimization skips a redundant `_maybe_wrap_data` call in this scenario.\n    \"\"\"\n    global dims, wrapped_data\n    np.random.seed(42)\n    \n    # Create a large pandas.Index to represent\
+    \ realistic coordinate data\n    N = 1_000_000\n    index_data = pd.Index(np.arange(N), name=\"time\")\n    \n    # Manually wrap the pandas.Index in a PandasIndexingAdapter.\n    # This simulates a\
+    \ scenario where data is already in an xarray-compatible\n    # wrapped format, and `fastpath=True` is intended to avoid re-wrapping.\n    wrapped_data = PandasIndexingAdapter(index_data)\n    \n  \
+    \  # Define dimensions for the Variable\n    dims = (\"x\",)\n\ndef workload():\n    \"\"\"\n    Measures the performance of creating an xarray.Variable.\n    \n    The `fastpath=True` argument, combined\
+    \ with `wrapped_data` (which is\n    already an adapter), directly exercises the changed logic in\n    `as_compatible_data`. The optimization aims to avoid redundant checks\n    and function calls when\
+    \ `fastpath` is enabled and the data is already\n    in a suitable wrapped format.\n    \"\"\"\n    global dims, wrapped_data\n    # Creating a Variable with `fastpath=True` and pre-wrapped data\n \
+    \   # will trigger the optimized path in `as_compatible_data`.\n    _ = Variable(dims, wrapped_data, fastpath=True)\n\n# Run the benchmark\n# number=1: Each run measures a single execution of the workload.\n\
+    # repeat=10: The workload is repeated 10 times to gather stable statistics.\nruntimes = timeit.repeat(workload, number=1, repeat=10, setup=setup)\n\n# Print the mean and standard deviation of the runtimes\n\
+    print(\"Mean:\", statistics.mean(runtimes))\nprint(\"Std Dev:\", statistics.stdev(runtimes))"
+  metric:
+    type: wall_time
+culprit: 50f87269e4c7b51c4afc6f5030760d7f8e584a09
+ground_truth: reported

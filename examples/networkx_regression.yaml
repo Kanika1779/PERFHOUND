@@ -1,0 +1,25 @@
+# Perfhound end-to-end demo on a repository that is NOT in any of our datasets.
+# networkx 3.3 calls its functions slower than 3.2 (per-call dispatch overhead).
+# 208 real commits between the two releases; nothing tells Perfhound which one.
+name: networkx-dispatch
+repo: https://github.com/networkx/networkx
+language: python
+good: networkx-3.2          # last fast release (tag)
+bad: networkx-3.3           # first slow release (tag)
+direction: slower
+benchmark:
+  name: has_path_small_graph
+  framework: script         # the workload below is a Python script using timeit.repeat
+  workload: |
+    import timeit
+    import networkx as nx
+
+    def setup():
+        global G
+        G = nx.path_graph(3)
+
+    def workload():
+        for _ in range(2000):
+            nx.has_path(G, 0, 2)
+
+    timeit.repeat(workload, number=1, repeat=10, setup=setup)

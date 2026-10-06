@@ -22,6 +22,7 @@ from .bench import BenchmarkRunner, EnvManager, infer_env
 from .gateway import Gateway, RegressionCase
 from .gateway.fetcher import RepoFetcher
 from .gateway.gitcmd import run_git
+from .gateway.local_git import parse_git_date
 from .llm import CachedLLM, GeminiClient, prioritize
 from .rag.documents import build_commit_documents, build_query
 from .rag.retriever import rank_candidates, rank_hybrid
@@ -58,6 +59,16 @@ def _llm(choice: str, model: str | None, log):
     client = GeminiClient(model) if model else GeminiClient()
     log(f"LLM: {client.model}")
     return CachedLLM(client)
+
+
+def commit_date(repo, ref: str) -> datetime:
+    """Committer date of `ref` (sha, branch or tag).
+
+    `ref` may be an annotated tag (e.g. networkx-3.3): it is peeled to its commit, otherwise `git show`
+    prints the tag header (tagger, PGP signature) before the date. parse_git_date also reads "Z" on 3.10.
+    """
+    iso, epoch = run_git(repo, "show", "-s", "--format=%cI%x00%ct", ref + "^{commit}").stdout.strip().split("\x00")
+    return parse_git_date(iso, epoch)
 
 
 def localize_case(case: RegressionCase, *, retriever: str = "auto", llm: str = "auto", model: str | None = None,
@@ -104,7 +115,7 @@ def localize_case(case: RegressionCase, *, retriever: str = "auto", llm: str = "
         raise ValueError("the case has no benchmark: add one to perfhound.yaml")
     if python is None:
         if b.framework == "script" or b.params.get("python") or b.params.get("requirements"):
-            date = datetime.fromisoformat(run_git(repo, "show", "-s", "--format=%cI", case.bad).stdout.strip())
+            date = commit_date(repo, case.bad)
             python = str(EnvManager().python_for(infer_env(case, date)))
         else:
             python = sys.executable        # command benchmarks: your environment (setup: can install into it)

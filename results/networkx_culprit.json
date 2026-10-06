@@ -1,0 +1,83 @@
+{
+ "format_version": 1,
+ "repo": "https://github.com/networkx/networkx",
+ "github": "networkx/networkx",
+ "mode": "real",
+ "good": {
+  "ref": "eec4012d14ec04467f13712b55ea03be53718136~1",
+  "sha": "8cffd1e7004a94be4556121cc3aff442772542d0"
+ },
+ "bad": {
+  "ref": "eec4012d14ec04467f13712b55ea03be53718136",
+  "sha": "eec4012d14ec04467f13712b55ea03be53718136",
+  "landed_at": "2024-02-23T14:42:39-05:00"
+ },
+ "count": 1,
+ "commits": [
+  {
+   "schema_version": 1,
+   "sha": "eec4012d14ec04467f13712b55ea03be53718136",
+   "parent": "8cffd1e7004a94be4556121cc3aff442772542d0",
+   "position": 0,
+   "message": "Transmogrify `_dispatchable` objects into functions (#7298)\n\n* Transmogrify `_dispatchable` objects into functions\r\n\r\n* fix?",
+   "author": "Erik Welch",
+   "timestamp": "2024-02-23T13:42:39-06:00",
+   "files": [
+    {
+     "path": "networkx/classes/tests/test_backends.py",
+     "status": "M",
+     "additions": 13,
+     "deletions": 1,
+     "old_path": null
+    },
+    {
+     "path": "networkx/utils/backends.py",
+     "status": "M",
+     "additions": 10,
+     "deletions": 0,
+     "old_path": null
+    },
+    {
+     "path": "networkx/utils/decorators.py",
+     "status": "M",
+     "additions": 7,
+     "deletions": 1,
+     "old_path": null
+    }
+   ],
+   "changed_functions": [
+    "networkx.classes.tests.test_backends.test_pickle",
+    "networkx.utils.backends.<module>",
+    "networkx.utils.backends._dispatchable.__new__",
+    "networkx.utils.decorators.argmap.signature"
+   ],
+   "added_functions": [
+    "networkx.classes.tests.test_backends.test_dispatchable_are_functions",
+    "networkx.utils.backends._do_nothing"
+   ],
+   "deleted_functions": [],
+   "unanalyzed_files": [],
+   "diff": "diff --git a/networkx/classes/tests/test_backends.py b/networkx/classes/tests/test_backends.py\nindex e1a7c1cf..cc171cf5 100644\n--- a/networkx/classes/tests/test_backends.py\n+++ b/networkx/classes/tests/test_backends.py\n@@ -17,8 +17,16 @@ def test_dispatch_kwds_vs_args():\n \n \n def test_pickle():\n+    count = 0\n     for name, func in nx.utils.backends._registered_algorithms.items():\n-        assert pickle.loads(pickle.dumps(func)) is func\n+        try:\n+            # Some functions can't be pickled, but it's not b/c of _dispatchable\n+            pickled = pickle.dumps(func)\n+        except pickle.PicklingError:\n+            continue\n+        assert pickle.loads(pickled) is func\n+        count += 1\n+    assert count > 0\n     assert pickle.loads(pickle.dumps(nx.inverse_line_graph)) is nx.inverse_line_graph\n \n \n@@ -74,3 +82,7 @@ def test_graph_converter_needs_backend():\n         del LoopbackDispatcher.from_scipy_sparse_array\n     with pytest.raises(ImportError, match=\"Unable to load\"):\n         nx.from_scipy_sparse_array(A, backend=\"bad-backend-name\")\n+\n+\n+def test_dispatchable_are_functions():\n+    assert type(nx.pagerank) is type(nx.pagerank.orig_func)\ndiff --git a/networkx/utils/backends.py b/networkx/utils/backends.py\nindex 73cf2946..d1491f51 100644\n--- a/networkx/utils/backends.py\n+++ b/networkx/utils/backends.py\n@@ -94,10 +94,15 @@ from importlib.metadata import entry_points\n import networkx as nx\n \n from ..exception import NetworkXNotImplemented\n+from .decorators import argmap\n \n __all__ = [\"_dispatchable\"]\n \n \n+def _do_nothing():\n+    \"\"\"This does nothing at all, yet it helps turn `_dispatchable` into functions.\"\"\"\n+\n+\n def _get_backends(group, *, load_and_call=False):\n     items = entry_points(group=group)\n     rv = {}\n@@ -348,6 +353,11 @@ class _dispatchable:\n             raise KeyError(\n                 f\"Algorithm already exists in dispatch registry: {name}\"\n             ) from None\n+        # Use the magic of `argmap` to turn `self` into a function. This does result\n+        # in small additional overhead compared to calling `_dispatchable` directly,\n+        # but `argmap` has the magical property that it can stack with other `argmap`\n+        # decorators \"for free\". Being a function is better for REPRs and type-checkers.\n+        self = argmap(_do_nothing)(self)\n         _registered_algorithms[name] = self\n         return self\n \ndiff --git a/networkx/utils/decorators.py b/networkx/utils/decorators.py\nindex e986434b..ea37a506 100644\n--- a/networkx/utils/decorators.py\n+++ b/networkx/utils/decorators.py\n@@ -1107,7 +1107,13 @@ class argmap:\n             if prev == param.POSITIONAL_ONLY != kind:\n                 # the last token was position-only, but this one isn't\n                 def_sig.append(\"/\")\n-            if prev != param.KEYWORD_ONLY == kind != param.VAR_POSITIONAL:\n+            if (\n+                param.VAR_POSITIONAL\n+                != prev\n+                != param.KEYWORD_ONLY\n+                == kind\n+                != param.VAR_POSITIONAL\n+            ):\n                 # param is the first keyword-only arg and isn't starred\n                 def_sig.append(\"*\")\n \n",
+   "diff_truncated": false,
+   "pr": {
+    "number": 7298,
+    "title": "Transmogrify `_dispatchable` objects into functions",
+    "body": "`_dispatchable` objects don't look good in REPRs and they make it really awkward for type checkers. This PR uses `argmap` to transmogrify `_dispatchable` objects into functions. I hope to someday understand `argmap`.\r\n\r\n@rossbar, this is as discussed in #7185 and the meeting today. Everything looks good in REPRs to me. This PR supercedes #7185.\r\n\r\nCC @rlratzel",
+    "labels": [
+     "type: Enhancements"
+    ],
+    "url": "https://github.com/networkx/networkx/pull/7298"
+   },
+   "source": "local",
+   "committed_at": "2024-02-23T14:42:39-05:00"
+  }
+ ],
+ "stats": {
+  "seconds": 2.19,
+  "from_cache": 1,
+  "github_requests": 0,
+  "with_pr": 1
+ },
+ "warnings": [],
+ "fetched_at": "2026-10-06T12:54:35+00:00"
+}

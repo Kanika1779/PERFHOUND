@@ -1,0 +1,27 @@
+== yaml:pydata__xarray-9001
+20 candidate commits between 6d62719061f7b9cbed3ea01c4adf2ce89c4f015f and c4031cd67c6e56f398414c27aab306656d8af517
+retrieval: BM25 (dense model unavailable: 403 Forbidden)
+LLM: off (--no-llm)
+
+most suspicious commits (prior):
+   18.2%  d7edbd7  Bump dependencies incl `pandas>=2` (#8968)
+   12.2%  214d941  Option to not auto-create index during expand_dims (#8960)
+    9.2%  50f8726  Simplify fast path (#9001)
+    7.4%  08e43b9  Switch all methods to `dim` (#8982)
+    6.2%  748bb3a  avoid a couple of warnings in `polyfit` (#8939)
+  [env] creating env 06f26abe1dc0cbd8: python 3.11.9, 3 requirements as of 2024-05-06T17:02:37Z
+  [env] env ready in 4 s
+
+calibration: good 1.599e-05 -> bad 1.251e-05 seconds (ratio 0.782, 5 runs each) - change confirmed
+  test   7 71372c1  -> good (2 runs)  top suspect now 18%
+  test  14 c2cd1dd  -> good (2 runs)  top suspect now 34%
+  test  17 8d728bf  -> good (2 runs)  top suspect now 64%
+  test  18 50f8726  -> good (2 runs)  top suspect now 47%
+  test  19 faa6345  -> bad  (2 runs)  top suspect now 79%
+  test  18 50f8726  -> good (3 runs)  top suspect now 94%
+  test  19 faa6345  -> bad  (3 runs)  top suspect now 99%
+
+CULPRIT: faa634579f3240e6fa36694e89cec3d674f784d3
+  Speed up localize (#8536)
+  confidence 98.6%, 26 benchmark runs (10 for calibration), 7 tests
+  (known culprit: 50f87269e4 - MISS)

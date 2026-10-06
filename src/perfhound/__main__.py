@@ -71,9 +71,13 @@ def _github_provider(fields: str = "title+body"):
 
     token, _ = find_token()
     client = GitHubClient(token)
+    cache = Cache()
+    rest = GitHubPRProvider(client, cache, fields=fields)
     if token:
-        return GitHubGraphQLProvider(client, Cache(), fields=fields)
-    return GitHubPRProvider(client, Cache(), fields=fields)
+        from perfhound.github_fallback import GraphQLWithRestFallback
+
+        return GraphQLWithRestFallback(GitHubGraphQLProvider(client, cache, fields=fields), rest)
+    return rest
 
 
 def cmd_github(args) -> int:

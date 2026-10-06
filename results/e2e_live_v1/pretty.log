@@ -1,0 +1,24 @@
+== yaml:sympy__sympy-21169
+20 candidate commits between 70532792bdb0906a8af3588bc20a16e4a84d2633 and 7aa05e91d1b11bfff466ed45c612f11157645811
+retrieval: BM25 (dense model unavailable: 403 Forbidden)
+LLM: off (--no-llm)
+
+most suspicious commits (prior):
+   18.2%  3d5cef0  Merge pull request #21169 from oscarbenjamin/pr_printing_spe
+   12.2%  97b7e44  Merge pull request #21235 from JSS95/assumptionwrapper
+    9.2%  500e7eb  Merge pull request #21299 from Upabjojr/transpose_elementwis
+    7.4%  7ba571c  Merge pull request #21279 from JSS95/pred_posinf_neginf
+    6.2%  ecbb836  Merge pull request #21259 from Sagar231/sagar231
+  [env] creating env 74a248657f5a8ade: python 3.8.8, 1 requirements as of 2021-04-13T09:01:34Z
+  [env] env ready in 3 s
+
+calibration: good 0.03396 -> bad 0.00848 seconds (ratio 0.250, 5 runs each) - change confirmed
+  test  11 d2f3144  -> bad  (2 runs)  top suspect now 34%
+  test   4 ea3aedd  -> bad  (2 runs)  top suspect now 60%
+  test   2 172dd46  -> good (2 runs)  top suspect now 74%
+  test   3 3d5cef0  -> bad  (2 runs)  top suspect now 97%
+
+CULPRIT: 3d5cef0a9f00013923938defd24eb7237aeaf58a
+  Merge pull request #21169 from oscarbenjamin/pr_printing_speedup
+  confidence 96.6%, 18 benchmark runs (10 for calibration), 4 tests
+  (known culprit: MATCH)

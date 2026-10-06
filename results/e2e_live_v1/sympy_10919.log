@@ -1,0 +1,18 @@
+== yaml:sympy__sympy-10919
+20 candidate commits between b95a4a982d8d4c87826b82a13a5343b89b3db0f5 and 54d2da14dba81dca07087f682f3b5fd3e9577b25
+retrieval: BM25 (dense model unavailable: 403 Forbidden)
+LLM: off (--no-llm)
+
+most suspicious commits (prior):
+   18.2%  64c2b64  Merge pull request #10900 from Nitin216/issue_10894
+   12.2%  182194f  Merge pull request #10919 from jtnydv25/fast_partitions
+    9.2%  c048faa  Merge pull request #10888 from jtnydv25/nth-prime-fast
+    7.4%  da8bb0d  Merge pull request #10824 from Upabjojr/integral_precedence
+    6.2%  d5ec01c  Merge pull request #10948 from nathanmusoke/RemoveDuplicateF
+  [env] creating env 7d9fb0cc0872bada: python 3.8, 2 requirements as of 2016-04-02T10:24:31Z
+  [env] old sdist needs newer setuptools: retrying with --no-build-isolation
+  [env] env ready in 2 s
+
+calibration: good 0.1545 -> bad 0.1561 seconds (ratio 1.011, 20 runs each) - NO significant change
+
+No culprit: good and bad do not differ significantly on this machine.

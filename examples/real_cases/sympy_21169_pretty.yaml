@@ -1,0 +1,25 @@
+name: sympy__sympy-21169
+repo: https://github.com/sympy/sympy
+language: python
+good: 70532792bdb0906a8af3588bc20a16e4a84d2633
+bad: 7aa05e91d1b11bfff466ed45c612f11157645811
+direction: faster
+benchmark:
+  name: workload
+  framework: script
+  workload: "import timeit\nimport statistics\nimport sympy\nfrom sympy.printing.pretty.pretty import PrettyPrinter\nfrom sympy.core.symbol import Symbol\n\n# Global variables to be set up once and used\
+    \ by the workload function\nprinter = None\ntest_seq = None\n\ndef setup():\n    \"\"\"\n    Prepares the necessary data and environment for the performance test.\n    This includes initializing the\
+    \ PrettyPrinter and creating a realistic,\n    non-trivial sequence of SymPy expressions.\n    \"\"\"\n    global printer, test_seq\n    \n    # Initialize the PrettyPrinter instance.\n    # This is\
+    \ a one-time setup cost and should not be part of the timed workload.\n    printer = PrettyPrinter()\n    \n    # Create a long sequence of SymPy symbols.\n    # This represents a common use case for\
+    \ _print_seq, such as printing\n    # elements of a set, tuple, or function arguments.\n    # A large number of elements (e.g., 1000) is chosen to make the\n    # performance difference of the _print_seq\
+    \ optimization noticeable.\n    num_elements = 1000\n    test_seq = [Symbol(f'x{i}') for i in range(num_elements)]\n\ndef workload():\n    \"\"\"\n    Executes the code path being measured.\n    This\
+    \ function calls the _print_seq method of the PrettyPrinter\n    with the pre-generated sequence.\n    \"\"\"\n    global printer, test_seq\n    \n    # Call the _print_seq method.\n    # The parameters\
+    \ (left, right, delimiter, parenthesize) are chosen to be\n    # representative of typical usage, e.g., printing a comma-separated list\n    # enclosed in parentheses.\n    # The `parenthesize=lambda\
+    \ x: False` simplifies the internal logic slightly\n    # to focus the measurement on the core string concatenation/joining logic\n    # that was optimized in the diff.\n    _ = printer._print_seq(test_seq,\
+    \ left='(', right=')', delimiter=', ', parenthesize=lambda x: False)\n\n# Run the benchmark using timeit.repeat\n# number=1: Each call to workload executes the _print_seq operation once for the entire\
+    \ sequence.\n# repeat=10: The workload is repeated 10 times to gather stable statistics.\nruntimes = timeit.repeat(workload, number=1, repeat=10, setup=setup)\n\n# Print the mean and standard deviation\
+    \ of the measured runtimes\nprint(\"Mean:\", statistics.mean(runtimes))\nprint(\"Std Dev:\", statistics.stdev(runtimes))"
+  metric:
+    type: wall_time
+culprit: 3d5cef0a9f00013923938defd24eb7237aeaf58a
+ground_truth: reported

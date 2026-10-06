@@ -1,0 +1,26 @@
+== yaml:sympy__sympy-15909
+20 candidate commits between 7f07e19289e41d6fa7135cd51f74fef82cf2cabd and e8cf4260af7461a42db9ed4edb2ab3fe442507c7
+retrieval: BM25 (dense model unavailable: 403 Forbidden)
+LLM: off (--no-llm)
+
+most suspicious commits (prior):
+   18.2%  3b18954  Merge pull request #15908 from adhoc-king/patch-3
+   12.2%  1bd5d04  Merge pull request #15909 from adhoc-king/patch-4
+    9.2%  cb8a524  Merge pull request #15875 from sylee957/fix_add_is_zero
+    7.4%  8b664e0  Merge pull request #15820 from oscargus/cleanupalgebras
+    6.2%  859412d  Merge pull request #15814 from oscargus/cleanupprinting
+  [env] creating env 8cb59317aac3b413: python 3.8, 1 requirements as of 2019-02-05T16:01:55Z
+  [env] old sdist needs newer setuptools: retrying with --no-build-isolation
+  [env] env ready in 3 s
+
+calibration: good 0.004954 -> bad 0.003108 seconds (ratio 0.627, 5 runs each) - change confirmed
+  test  10 75e2226  -> good (2 runs)  top suspect now 32%
+  test  15 b78afeb  -> good (2 runs)  top suspect now 41%
+  test  17 8b664e0  -> good (2 runs)  top suspect now 67%
+  test  18 1bd5d04  -> bad  (2 runs)  top suspect now 93%
+  test  17 8b664e0  -> good (2 runs)  top suspect now 97%
+
+CULPRIT: 1bd5d04ffe2b47b91fd03a868ca31c3c3f9e243e
+  Merge pull request #15909 from adhoc-king/patch-4
+  confidence 97.4%, 20 benchmark runs (10 for calibration), 5 tests
+  (known culprit: MATCH)

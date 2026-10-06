@@ -1,0 +1,24 @@
+== yaml:sympy__sympy-27051
+20 candidate commits between 95a8175eb35ca7c8d84afadafb8df4bfb93fd1d2 and 52d8158b238c467a094147f2434756927208e579
+retrieval: BM25 (dense model unavailable: 403 Forbidden)
+LLM: off (--no-llm)
+
+most suspicious commits (prior):
+   18.2%  b937229  Merge pull request #27051 from aasim-maverick/improvement/pr
+   12.2%  d1cb1aa  Merge pull request #27035 from haru-44/prime_nextprime
+    9.2%  ab00fc0  Merge pull request #27060 from haru-44/prime_comment
+    7.4%  f5ddc7f  Merge pull request #27025 from bharatAmeria/test_case_for_wr
+    6.2%  4991dc7  Merge pull request #26992 from anutosh491/cdir
+  [env] creating env 1b3ad0b84851f3d9: python 3.12.6, 1 requirements as of 2024-09-14T15:00:49Z
+  [env] env ready in 2 s
+
+calibration: good 0.04901 -> bad 0.008668 seconds (ratio 0.177, 5 runs each) - change confirmed
+  test  11 5ee5523  -> good (2 runs)  top suspect now 34%
+  test  17 5815588  -> good (2 runs)  top suspect now 59%
+  test  18 b937229  -> bad  (2 runs)  top suspect now 91%
+  test  17 5815588  -> good (2 runs)  top suspect now 96%
+
+CULPRIT: b937229a90d72f38cff07e8271ad132b155904d4
+  Merge pull request #27051 from aasim-maverick/improvement/prime-performance-tuning
+  confidence 96.5%, 18 benchmark runs (10 for calibration), 4 tests
+  (known culprit: MATCH)

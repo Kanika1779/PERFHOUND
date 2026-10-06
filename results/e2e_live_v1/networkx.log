@@ -1,0 +1,30 @@
+== yaml:networkx-dispatch
+208 candidate commits between networkx-3.2 and networkx-3.3
+retrieval: BM25 (dense model unavailable: 403 Forbidden)
+LLM: off (--no-llm)
+
+most suspicious commits (prior):
+    9.7%  9df3e5e  DOC: Turn on inline plots in graph generators docstrings (#6
+    6.5%  0d878d8  Update test suite to handle when scipy is not installed (#73
+    4.8%  9cc8b42  Add Kirchhoff index / Effective graph resistance (#6926)
+    3.9%  5d2bd43  Compare graphs for generator functions when running tests wi
+    3.2%  72d1f68  ENH: Speed up common/non_neighbors by using _adj dict operat
+  [env] creating env a51e9091a7de28ef: python 3.11.9, 1 requirements as of 2024-04-06T12:57:30Z
+  [env] env ready in 0 s
+
+calibration: good 0.004838 -> bad 0.006223 seconds (ratio 1.286, 5 runs each) - change confirmed
+  test  97 73c6552  -> good (2 runs)  top suspect now 12%
+  test 150 eec4012  -> bad  (2 runs)  top suspect now 12%
+  test 123 f488d08  -> good (2 runs)  top suspect now 22%
+  test 131 1fa2414  -> good (2 runs)  top suspect now 11%
+  test 143 fce5d7d  -> good (8 runs)  top suspect now 21%
+  test 148 b7782fa  -> good (2 runs)  top suspect now 17%
+  test 166 41fd8df  -> bad  (2 runs)  top suspect now 26%
+  test 150 eec4012  -> bad  (2 runs)  top suspect now 43%
+  test 149 8cffd1e  -> good (2 runs)  top suspect now 85%
+  test 150 eec4012  -> bad  (2 runs)  top suspect now 92%
+  test 149 8cffd1e  -> good (2 runs)  top suspect now 99%
+
+CULPRIT: eec4012d14ec04467f13712b55ea03be53718136
+  Transmogrify `_dispatchable` objects into functions (#7298)
+  confidence 99.1%, 38 benchmark runs (10 for calibration), 11 tests

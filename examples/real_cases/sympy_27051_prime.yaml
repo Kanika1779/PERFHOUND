@@ -1,0 +1,25 @@
+name: sympy__sympy-27051
+repo: https://github.com/sympy/sympy
+language: python
+good: 95a8175eb35ca7c8d84afadafb8df4bfb93fd1d2
+bad: 52d8158b238c467a094147f2434756927208e579
+direction: faster
+benchmark:
+  name: workload
+  framework: script
+  workload: "import timeit\nimport statistics\nimport sympy\nfrom sympy.ntheory.generate import prime, Sieve, sieve\n\ndef setup():\n    global prime_numbers_to_find\n    global sieve\n\n    # Reset the\
+    \ global sieve instance to a minimal state.\n    # This ensures that each `timeit` run starts with a small sieve,\n    # forcing the `prime` function to perform its extension logic\n    # (either by\
+    \ direct sieve extension or via li/binary search)\n    # rather than just retrieving from an already fully populated sieve.\n    sieve._reset()\n\n    # Define a list of nth prime numbers to find.\n\
+    \    # These values are chosen to test different code paths introduced/optimized in the diff:\n    # - `500`, `900`: These values are less than 1000, triggering the new\n    #   `if n < 1000` optimization\
+    \ which directly extends the sieve.\n    # - `5000`, `10000`, `50000`: These values are greater than 1000,\n    #   triggering the `li` (logarithmic integral) and binary search logic.\n    #   The `evalf()`\
+    \ calls on `log` and `li` within this path are the key\n    #   performance improvement for these larger values.\n    # The list ensures varied inputs and cumulative sieve extension,\n    # simulating\
+    \ a realistic sequence of calls.\n    prime_numbers_to_find = [500, 900, 5000, 10000, 50000]\n\ndef workload():\n    global prime_numbers_to_find\n    results = []\n    for n in prime_numbers_to_find:\n\
+    \        # Call the prime function for each nth value.\n        # This will progressively extend the global sieve and/or use the\n        # li/binary search logic as needed.\n        results.append(prime(n))\n\
+    \    # Store results to prevent potential compiler optimizations from\n    # eliminating the computation if the return value is not used.\n    _ = results\n\n# Run the benchmark using timeit.repeat.\n\
+    # `number=1` means the `workload` function is executed once per timing run.\n# `repeat=10` means the entire timing run (executing `workload` once) is\n# repeated 10 times to gather stable statistics.\n\
+    runtimes = timeit.repeat(workload, number=1, repeat=10, setup=setup)\n\n# Print the mean and standard deviation of the measured runtimes.\nprint(\"Mean:\", statistics.mean(runtimes))\nprint(\"Std Dev:\"\
+    , statistics.stdev(runtimes))"
+  metric:
+    type: wall_time
+culprit: b937229a90d72f38cff07e8271ad132b155904d4
+ground_truth: reported
